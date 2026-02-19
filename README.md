@@ -143,15 +143,43 @@ You should see a JSON response with the server capabilities.
 
 ---
 
-## Connect to Claude Code
+## Connect Your AI Agent
 
-Add this to your project's `.mcp.json` file (or `~/.claude.json` for global access):
+Penpot MCP uses **network transport** (streamable HTTP) — the server runs as a Docker container and clients connect via HTTP. This means:
+
+- The server is **always running** independently (via Docker Compose)
+- The client only needs the URL to connect — no process spawning
+- **`env` in the client's JSON config is irrelevant** — credentials live in the server's own `.env` file (configured during [setup](#quick-start))
+- Any client on the same machine (or network) can connect to `http://localhost:8787/mcp`
+
+> **Key difference from stdio servers:** With stdio servers (like Skill Swarm), the client launches the process and injects env vars. With network servers like Penpot MCP, the server manages its own credentials. The `env` block in your client's MCP config has no effect.
+
+---
+
+### Claude Code
+
+Claude Code uses `"type": "http"` for streamable HTTP connections.
+
+**Global** (`~/.claude.json`):
 
 ```json
 {
   "mcpServers": {
     "penpot": {
-      "type": "streamable-http",
+      "type": "http",
+      "url": "http://localhost:8787/mcp"
+    }
+  }
+}
+```
+
+**Project-level** (`.mcp.json` in your project root):
+
+```json
+{
+  "mcpServers": {
+    "penpot": {
+      "type": "http",
       "url": "http://localhost:8787/mcp"
     }
   }
@@ -160,9 +188,66 @@ Add this to your project's `.mcp.json` file (or `~/.claude.json` for global acce
 
 Restart Claude Code. You should see **66 tools** from the `penpot` server listed when you run `/mcp`.
 
+> **Note:** Use `"type": "http"`, not `"streamable-http"`. Claude Code maps `http` to the streamable HTTP transport internally. Using `streamable-http` will cause a schema validation error.
+
+---
+
+### Gemini CLI
+
+Gemini CLI uses `httpUrl` (not `url`) for streamable HTTP connections. Transport is inferred from the field name.
+
+**Config file:** `~/.gemini/settings.json`
+
+```json
+{
+  "mcpServers": {
+    "penpot": {
+      "httpUrl": "http://localhost:8787/mcp"
+    }
+  }
+}
+```
+
+> **Note:** Gemini CLI distinguishes between `url` (SSE transport) and `httpUrl` (streamable HTTP transport). Penpot MCP uses streamable HTTP, so use `httpUrl`. No `type` field needed.
+
+---
+
+### Antigravity
+
+Antigravity uses `serverUrl` for HTTP-based MCP servers.
+
+**Config file:** `~/.gemini/antigravity/mcp_config.json`
+
+```json
+{
+  "mcpServers": {
+    "penpot": {
+      "serverUrl": "http://localhost:8787/mcp"
+    }
+  }
+}
+```
+
+> **Note:** Antigravity uses `serverUrl` (not `url` or `httpUrl`). If Antigravity runs inside Docker, make sure it can reach `localhost:8787` on the host — you may need `host.docker.internal:8787` instead of `localhost:8787` depending on your Docker network setup.
+
+---
+
+### Quick Comparison
+
+| | Claude Code | Gemini CLI | Antigravity |
+|---|---|---|---|
+| **Config file** | `~/.claude.json` or `.mcp.json` | `~/.gemini/settings.json` | `~/.gemini/antigravity/mcp_config.json` |
+| **URL field** | `"url"` | `"httpUrl"` | `"serverUrl"` |
+| **Type field** | `"type": "http"` (required) | Not needed (inferred) | Not needed (inferred) |
+| **`env` in JSON** | No effect (network server) | No effect (network server) | No effect (network server) |
+| **Credentials** | Server's `.env` file | Server's `.env` file | Server's `.env` file |
+| **Docker networking** | `localhost:8787` | `localhost:8787` | May need `host.docker.internal:8787` |
+
+---
+
 ### Example prompts
 
-Once connected, you can ask Claude things like:
+Once connected, you can ask your AI agent things like:
 
 - *"List my Penpot projects"*
 - *"Create a login form with email/password fields and a submit button"*
