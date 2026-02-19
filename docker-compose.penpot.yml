@@ -1,0 +1,48 @@
+# ═══════════════════════════════════════════════════════════
+# Penpot MCP Server — Docker Compose Service Definition
+# ═══════════════════════════════════════════════════════════
+#
+# This is NOT a standalone docker-compose file.
+# Copy this service definition into your existing Penpot
+# docker-compose.yml, inside the `services:` section.
+#
+# Prerequisites:
+#   - Your Penpot stack uses a network named "penpot"
+#   - penpot-postgres has a healthcheck configured
+#   - You have cloned this repo next to your Penpot compose file
+#     (or adjust the build context path)
+#
+# After adding, run:
+#   docker compose up -d --build penpot-mcp
+# ═══════════════════════════════════════════════════════════
+
+services:
+  penpot-mcp:
+    build:
+      context: ./penpot-mcp-server
+      dockerfile: Dockerfile
+    container_name: penpot-mcp
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8787:8787"
+    depends_on:
+      penpot-postgres:
+        condition: service_healthy
+      penpot-backend:
+        condition: service_started
+    networks:
+      - penpot
+    environment:
+      PENPOT_BASE_URL: "http://penpot-frontend:8080"
+      PENPOT_PUBLIC_URL: "${PENPOT_PUBLIC_URI:-http://localhost:9001}"
+      PENPOT_ACCESS_TOKEN: "${PENPOT_ACCESS_TOKEN:-}"
+      PENPOT_EMAIL: "${PENPOT_EMAIL:-}"
+      PENPOT_PASSWORD: "${PENPOT_PASSWORD:-}"
+      PENPOT_DB_HOST: "penpot-postgres"
+      PENPOT_DB_PORT: "5432"
+      PENPOT_DB_NAME: "penpot"
+      PENPOT_DB_USER: "penpot"
+      PENPOT_DB_PASS: "${POSTGRES_PASSWORD:-penpot}"
+      MCP_HOST: "0.0.0.0"
+      MCP_PORT: "8787"
+      MCP_LOG_LEVEL: "info"

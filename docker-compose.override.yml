@@ -1,0 +1,5 @@
+## DEPRECATED: The penpot-mcp service is now in the main docker-compose.yml.
+## This file is kept for reference only.
+##
+## Usage (main compose): docker compose up -d penpot-mcp
+## Rebuild: docker compose up -d --build penpot-mcp
