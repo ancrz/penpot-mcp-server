@@ -338,3 +338,9 @@ This project is licensed under the [Apache License 2.0](LICENSE).
 - [Penpot](https://penpot.app) — The open-source design platform
 - [Model Context Protocol](https://modelcontextprotocol.io) — The protocol standard
 - [FastMCP](https://github.com/modelcontextprotocol/python-sdk) — Python MCP SDK
+
+<div align="center">
+
+[⬆ Back to Top](#penpot-mcp-server)
+
+</div>
