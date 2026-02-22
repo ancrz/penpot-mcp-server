@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     mcp_port: int = 8787
     mcp_log_level: str = "info"
 
+    # WebSocket / Plugin channel
+    ws_host: str = "0.0.0.0"
+    ws_port: int = 4402
+    plugin_ws_url: str = "ws://localhost:4402"
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
     @property

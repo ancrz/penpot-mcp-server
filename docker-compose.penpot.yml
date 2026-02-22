@@ -25,6 +25,7 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:8787:8787"
+      - "127.0.0.1:4402:4402"
     depends_on:
       penpot-postgres:
         condition: service_healthy
@@ -46,3 +47,6 @@ services:
       MCP_HOST: "0.0.0.0"
       MCP_PORT: "8787"
       MCP_LOG_LEVEL: "info"
+      WS_HOST: "0.0.0.0"
+      WS_PORT: "4402"
+      PLUGIN_WS_URL: "ws://localhost:4402"

@@ -5,35 +5,16 @@ from __future__ import annotations
 import json
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
+from starlette.responses import FileResponse, JSONResponse
 
 from penpot_mcp.config import settings
 from penpot_mcp.services.api import api
 from penpot_mcp.services.db import db
 
 logger = logging.getLogger(__name__)
-
-
-@asynccontextmanager
-async def lifespan(server: FastMCP):
-    """Connect to Penpot DB and API on startup, disconnect on shutdown."""
-    logger.info("Connecting to Penpot services...")
-    await db.connect()
-    await api.connect()
-
-    from penpot_mcp.ws_controller import ws_controller
-
-    await ws_controller.start()
-
-    logger.info("Penpot MCP server ready")
-    try:
-        yield
-    finally:
-        await ws_controller.stop()
-        await api.close()
-        await db.close()
-        logger.info("Penpot MCP server stopped")
 
 
 mcp = FastMCP(
@@ -45,8 +26,101 @@ mcp = FastMCP(
     ),
     host=settings.mcp_host,
     port=settings.mcp_port,
-    lifespan=lifespan,
 )
+
+
+# ═══════════════════════════════════════════════════════════════
+# Root health check
+# ═══════════════════════════════════════════════════════════════
+
+
+@mcp.custom_route("/", methods=["GET"])
+async def root(request):
+    """Root health check endpoint."""
+    return JSONResponse({"service": "Penpot MCP", "status": "ok", "version": "0.1.0"})
+
+
+# ═══════════════════════════════════════════════════════════════
+# Plugin: Static file serving for Penpot browser plugin
+# Load via Penpot: Main Menu -> Plugin Manager -> http://localhost:8787/plugin/manifest.json
+# ═══════════════════════════════════════════════════════════════
+
+_PLUGIN_DIR = Path(__file__).parent / "plugin"
+
+
+@mcp.custom_route("/plugin/manifest.json", methods=["GET", "OPTIONS"])
+async def plugin_manifest(request):
+    """Serve the Penpot plugin manifest."""
+    if request.method == "OPTIONS":
+        from starlette.responses import Response
+        return Response(
+            status_code=204,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, OPTIONS",
+            },
+        )
+    return FileResponse(
+        _PLUGIN_DIR / "manifest.json",
+        media_type="application/json",
+        headers={"Access-Control-Allow-Origin": "*"},
+    )
+
+
+@mcp.custom_route("/plugin/plugin.js", methods=["GET", "OPTIONS"])
+async def plugin_js(request):
+    """Serve the Penpot plugin JavaScript."""
+    if request.method == "OPTIONS":
+        from starlette.responses import Response
+        return Response(
+            status_code=204,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, OPTIONS",
+            },
+        )
+    return FileResponse(
+        _PLUGIN_DIR / "plugin.js",
+        media_type="application/javascript",
+        headers={"Access-Control-Allow-Origin": "*"},
+    )
+
+
+@mcp.custom_route("/plugin/ui.html", methods=["GET", "OPTIONS"])
+async def plugin_ui(request):
+    """Serve the Penpot plugin UI panel."""
+    if request.method == "OPTIONS":
+        from starlette.responses import Response
+        return Response(
+            status_code=204,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, OPTIONS",
+            },
+        )
+    return FileResponse(
+        _PLUGIN_DIR / "ui.html",
+        media_type="text/html",
+        headers={"Access-Control-Allow-Origin": "*"},
+    )
+
+
+@mcp.custom_route("/plugin/config.json", methods=["GET", "OPTIONS"])
+async def plugin_config(request):
+    """Serve dynamic plugin configuration (WebSocket URL)."""
+    if request.method == "OPTIONS":
+        from starlette.responses import Response
+        return Response(
+            status_code=204,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, OPTIONS",
+            },
+        )
+    return JSONResponse(
+        {"ws_url": settings.plugin_ws_url, "version": "1.0.0"},
+        headers={"Access-Control-Allow-Origin": "*"},
+    )
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1492,11 +1566,46 @@ async def set_text_style(
 
 def main():
     """Run the Penpot MCP server."""
+    import anyio
+    import uvicorn
+
     logging.basicConfig(
         level=getattr(logging, settings.mcp_log_level.upper(), logging.INFO),
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     )
-    mcp.run(transport="streamable-http")
+
+    async def run():
+        starlette_app = mcp.streamable_http_app()
+        _orig_lifespan = starlette_app.router.lifespan_context
+
+        @asynccontextmanager
+        async def _startup_lifespan(app):
+            logger.info("Connecting to Penpot services...")
+            await db.connect()
+            await api.connect()
+            from penpot_mcp.ws_controller import ws_controller
+            await ws_controller.start()
+            logger.info("Penpot MCP server ready (WS on port %d)", settings.ws_port)
+            try:
+                async with _orig_lifespan(app):
+                    yield
+            finally:
+                await ws_controller.stop()
+                await api.close()
+                await db.close()
+                logger.info("Penpot MCP server stopped")
+
+        starlette_app.router.lifespan_context = _startup_lifespan
+
+        config = uvicorn.Config(
+            starlette_app,
+            host=settings.mcp_host,
+            port=settings.mcp_port,
+            log_level=settings.mcp_log_level.lower(),
+        )
+        await uvicorn.Server(config).serve()
+
+    anyio.run(run)
 
 
 if __name__ == "__main__":

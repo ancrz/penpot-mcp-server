@@ -1,6 +1,6 @@
 # Penpot MCP Server — Tool Reference
 
-Complete reference for all **66 tools** provided by the server.
+Complete reference for all **68 tools** provided by the server.
 
 ---
 
@@ -815,3 +815,63 @@ Set text styling (bold, italic, underline).
 | `font_weight` | string | No | "400"=normal, "700"=bold, etc. |
 | `font_style` | string | No | "normal" or "italic". |
 | `text_decoration` | string | No | "none", "underline", or "line-through". |
+
+---
+
+## 14. Interactive Mode (Browser Plugin)
+
+These tools require the **Penpot MCP Browser Plugin** to be installed and connected.
+See [Interactive Mode](README.md#interactive-mode-browser-plugin) for setup instructions.
+
+---
+
+### `get_active_selection`
+
+Get the UUIDs of shapes currently selected by the user in the Penpot canvas.
+
+**Parameters:** None
+
+**Requires:** Penpot MCP Plugin connected in browser.
+
+**Returns:**
+```json
+{ "selected_shape_ids": ["uuid1", "uuid2"] }
+```
+Returns an error object if the plugin is not connected.
+
+---
+
+### `execute_plugin_script`
+
+Execute a JavaScript snippet directly in the Penpot Plugin API context.
+
+The script has access to the `penpot` Plugin API object (e.g., `penpot.selection`, `penpot.currentPage`, etc.).
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `script` | string | Yes | JavaScript code to execute. Has access to `penpot` Plugin API object. |
+
+**Requires:** Penpot MCP Plugin connected in browser.
+
+**Returns:**
+```json
+{ "status": "Script executed (or broadcasted) successfully." }
+```
+Returns an error object if the plugin is not connected or execution fails.
+
+**Example scripts:**
+```javascript
+// Get all shapes on current page
+const shapes = penpot.currentPage.findAll(() => true);
+console.log(shapes.map(s => s.name));
+
+// Change fill color of selected shapes
+penpot.selection.forEach(shape => {
+  if (shape.fills) {
+    shape.fills = [{ fillType: 'solid', fillColor: '#FF0000', fillOpacity: 1 }];
+  }
+});
+penpot.viewport.saveChanges();
+```

@@ -5,7 +5,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python 3.13+](https://img.shields.io/badge/Python-3.13+-yellow.svg)](https://python.org)
 [![MCP Protocol](https://img.shields.io/badge/MCP-2025--03--26-green.svg)](https://modelcontextprotocol.io)
-[![Tools: 66](https://img.shields.io/badge/Tools-66-orange.svg)](TOOLS.md)
+[![Tools: 68](https://img.shields.io/badge/Tools-68-orange.svg)](TOOLS.md)
 
 ---
 
@@ -20,7 +20,7 @@ Think of it as the bridge between your AI assistant and your design tool.
 | Problem | Solution |
 |---|---|
 | **Manual design work** | AI creates UI components, layouts, and prototypes directly in Penpot |
-| **No programmatic API for Penpot** | 66 tools covering projects, shapes, text, exports, comments, and more |
+| **No programmatic API for Penpot** | 68 tools covering projects, shapes, text, exports, comments, and more |
 | **Design-to-code gap** | Generate CSS from any shape, export to SVG/PNG, extract design tokens |
 | **Repetitive tasks** | Batch operations — rename shapes, update colors, create variants |
 | **Design system maintenance** | Read/write components, colors, typographies programmatically |
@@ -35,8 +35,11 @@ graph TB
     MCP["penpot-mcp<br/>Python + FastMCP<br/>:8787"]
     PG["PostgreSQL<br/>penpot-postgres<br/>:5432"]
     BE["Penpot Backend<br/>penpot-backend<br/>:6060"]
-    FE["Penpot Frontend<br/>penpot-frontend<br/>:8080"]
+    FE["Penpot Frontend<br/>localhost:9001"]
     EX["Penpot Exporter<br/>penpot-exporter<br/>:6061"]
+    WS["WebSocket Bridge<br/>:4402"]
+    PL["Browser Plugin<br/>plugin.js + ui.html"]
+    US["User's Browser<br/>(Penpot open)"]
 
     AI -->|"Streamable HTTP"| MCP
     MCP -->|"Direct SQL reads<br/>(asyncpg)"| PG
@@ -44,6 +47,9 @@ graph TB
     MCP -->|"Export requests"| BE
     BE -->|"Render"| EX
     FE -->|"Proxy"| BE
+    MCP <-->|"WebSocket"| WS
+    WS <-->|"ws://localhost:4402"| PL
+    PL -->|"Penpot Plugin API"| US
 
     style AI fill:#7c3aed,color:#fff
     style MCP fill:#2563eb,color:#fff
@@ -51,6 +57,9 @@ graph TB
     style BE fill:#ea580c,color:#fff
     style FE fill:#ea580c,color:#fff
     style EX fill:#ea580c,color:#fff
+    style WS fill:#0891b2,color:#fff
+    style PL fill:#0891b2,color:#fff
+    style US fill:#475569,color:#fff
 ```
 
 **Dual-access strategy:**
@@ -70,6 +79,7 @@ graph TB
 | HTTP Client | [httpx](https://www.python-httpx.org/) | Penpot RPC API calls |
 | Validation | [Pydantic v2](https://docs.pydantic.dev/) | Automatic parameter validation |
 | Package Manager | [uv](https://github.com/astral-sh/uv) | Fast Python dependency management |
+| WebSocket | [websockets](https://websockets.readthedocs.io/) | Real-time browser plugin bridge |
 | Container | Docker | Deployment alongside Penpot |
 
 ---
@@ -134,6 +144,13 @@ docker compose up -d --build penpot-mcp
 #### 5. Verify it's running
 
 ```bash
+# Quick health check
+curl -s http://localhost:8787/
+# → {"service": "Penpot MCP", "status": "ok", "version": "0.1.0"}
+```
+
+```bash
+# Full MCP protocol initialization
 curl -s http://localhost:8787/mcp \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}'
@@ -186,7 +203,7 @@ Claude Code uses `"type": "http"` for streamable HTTP connections.
 }
 ```
 
-Restart Claude Code. You should see **66 tools** from the `penpot` server listed when you run `/mcp`.
+Restart Claude Code. You should see **68 tools** from the `penpot` server listed when you run `/mcp`.
 
 > **Note:** Use `"type": "http"`, not `"streamable-http"`. Claude Code maps `http` to the streamable HTTP transport internally. Using `streamable-http` will cause a schema validation error.
 
@@ -257,9 +274,68 @@ Once connected, you can ask your AI agent things like:
 
 ---
 
+## Interactive Mode: Browser Plugin
+
+The Penpot MCP Plugin bridges the AI agent with the **live Penpot canvas**, enabling real-time context awareness:
+
+- **Live selection**: AI can query which shapes you currently have selected
+- **Script execution**: AI can run JavaScript directly via the Penpot Plugin API
+
+> These features require the browser plugin to be connected. The 66 headless tools work without it.
+
+### Loading the Plugin
+
+1. Make sure the MCP server is running: `docker compose up -d penpot-mcp`
+2. Open Penpot in your browser
+3. Press **Ctrl+Alt+P** (or Main Menu -> Plugin Manager)
+4. Paste the URL in the input field: `http://localhost:8787/plugin/manifest.json`
+5. Click **Install** → **Allow** on the permissions dialog
+6. Click **Open** to launch the plugin panel
+
+The plugin panel appears on the right. When the status indicator turns green, the AI agent has live access to the canvas.
+
+### Penpot Flags Requirement
+
+The Penpot backend must have `enable-plugins-runtime` in `PENPOT_FLAGS`:
+
+```env
+PENPOT_FLAGS=enable-login-with-password enable-registration enable-access-tokens enable-plugins-runtime
+```
+
+> **Restart required:** After adding `enable-plugins-runtime`, restart both `penpot-backend` and `penpot-frontend`:
+> ```bash
+> docker compose restart penpot-backend penpot-frontend
+> ```
+
+### Browser Compatibility
+
+| Browser | Status | Notes |
+|---------|--------|-------|
+| **Firefox** | Works out of the box | No local network restrictions |
+| **Chrome / Chromium** | Requires one-time approval | See below |
+| **Brave** | Requires Shield disabled | See below |
+| **Vivaldi** | Requires one-time approval | Same as Chrome |
+
+#### Chrome / Vivaldi: Local Network Access
+
+Chrome may show a permission popup: **"Allow [localhost:9001] to access your local network?"**
+
+1. Click **Allow** when the popup appears
+2. The plugin will connect automatically
+
+If no popup appears and the plugin stays disconnected, check `chrome://flags/#private-network-access-respect-preflight-results` -- disable it for local development.
+
+#### Brave: Shield
+
+1. Click the **Shield icon** (lion) in the address bar
+2. Disable the Shield for `localhost:9001` (or set to "No Blocking")
+3. Reload the Penpot tab and reconnect the plugin
+
+---
+
 ## Tools Overview
 
-The server provides **66 tools** across 11 categories. See [**TOOLS.md**](TOOLS.md) for the complete reference with all parameters.
+The server provides **68 tools** across 11 categories. See [**TOOLS.md**](TOOLS.md) for the complete reference with all parameters.
 
 | Category | Count | Examples |
 |---|---|---|
@@ -298,6 +374,9 @@ All settings are via environment variables. See [`.env.example`](.env.example) f
 | `MCP_HOST` | `0.0.0.0` | MCP server bind address |
 | `MCP_PORT` | `8787` | MCP server port |
 | `MCP_LOG_LEVEL` | `info` | Log level (debug/info/warning/error) |
+| `WS_HOST` | `0.0.0.0` | WebSocket server bind address |
+| `WS_PORT` | `4402` | WebSocket port for browser plugin |
+| `PLUGIN_WS_URL` | `ws://localhost:4402` | WebSocket URL the browser plugin uses to connect |
 
 ---
 
@@ -371,8 +450,14 @@ uv run pytest tests/ -v
 ```
 penpot-mcp-server/
 ├── src/penpot_mcp/
-│   ├── server.py            # FastMCP entry point, 66 tool registrations
+│   ├── server.py            # FastMCP entry point, 68 tool registrations, plugin routes
 │   ├── config.py            # Pydantic Settings configuration
+│   ├── gateway.py           # Hybrid context gateway (DB + Plugin awareness)
+│   ├── ws_controller.py     # WebSocket server for browser plugin bridge (:4402)
+│   ├── plugin/
+│   │   ├── manifest.json    # Penpot plugin manifest (served at /plugin/manifest.json)
+│   │   ├── plugin.js        # Plugin worker — penpot.* API only (no WebSocket in sandbox)
+│   │   └── ui.html          # Plugin iframe — WebSocket lives here, relays to plugin.js
 │   ├── services/
 │   │   ├── db.py            # asyncpg connection pool
 │   │   ├── api.py           # httpx RPC API client

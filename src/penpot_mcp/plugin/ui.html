@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Penpot MCP</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #1e1e1e;
+      color: #e0e0e0;
+      padding: 16px;
+    }
+    h2 {
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: #a0a0a0;
+      margin-bottom: 12px;
+    }
+    .status-card {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: #2a2a2a;
+      border-radius: 8px;
+      padding: 12px 14px;
+      margin-bottom: 14px;
+      border: 1px solid #333;
+    }
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #facc15;
+      flex-shrink: 0;
+      transition: background 0.3s;
+    }
+    .dot.connected    { background: #4ade80; box-shadow: 0 0 6px #4ade8066; }
+    .dot.disconnected { background: #f87171; }
+    .dot.connecting   { background: #facc15; }
+    #status-text { font-size: 13px; font-weight: 500; }
+    .hint { font-size: 11px; color: #666; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <h2>Penpot MCP</h2>
+  <div class="status-card">
+    <div class="dot connecting" id="dot"></div>
+    <span id="status-text">Connecting...</span>
+  </div>
+  <p class="hint">
+    When connected, your AI assistant can read the active canvas selection
+    and execute design scripts via the Penpot Plugin API.
+  </p>
+
+  <script>
+    // ui.html runs in a normal browser iframe — has full WebSocket access.
+    // Bridge: MCP server <-> WebSocket <-> ui.html <-> postMessage <-> plugin.js
+    //
+    // Inbound  (server→plugin): WS message {type:"execute"} → parent.postMessage → plugin.js
+    // Outbound (plugin→server): plugin.js penpot.ui.sendMessage → window message → WS send
+
+    var wsUrl = "ws://localhost:4402";
+    var socket = null;
+    var reconnectDelay = 1000;
+
+    function updateStatus(status) {
+      var dot  = document.getElementById("dot");
+      var text = document.getElementById("status-text");
+      if (status === "connected") {
+        dot.className = "dot connected";
+        text.textContent = "Connected to MCP Server";
+      } else {
+        dot.className = "dot disconnected";
+        text.textContent = "Not connected — retrying...";
+      }
+    }
+
+    function connect() {
+      try {
+        socket = new WebSocket(wsUrl);
+      } catch (e) {
+        console.error("[Penpot MCP] WebSocket error:", e);
+        setTimeout(connect, reconnectDelay);
+        return;
+      }
+
+      socket.onopen = function () {
+        reconnectDelay = 1000;
+        updateStatus("connected");
+        console.log("[Penpot MCP] Connected to", wsUrl);
+      };
+
+      socket.onmessage = function (event) {
+        try {
+          var msg = JSON.parse(event.data);
+          // Forward execute commands to plugin.js worker via postMessage
+          if (msg.type === "execute") {
+            parent.postMessage(msg, "*");
+          }
+        } catch (e) {
+          console.error("[Penpot MCP] WS parse error:", e);
+        }
+      };
+
+      socket.onclose = function () {
+        updateStatus("disconnected");
+        setTimeout(connect, reconnectDelay);
+        reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+      };
+
+      socket.onerror = function () {
+        console.warn("[Penpot MCP] WS error — will reconnect");
+      };
+    }
+
+    // Receive selectionchange / ack from plugin.js and forward to WebSocket server
+    window.addEventListener("message", function (event) {
+      var msg = event.data;
+      if (!msg || !msg.type) return;
+      if (msg.type === "selectionchange" || msg.type === "ack") {
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify(msg));
+        }
+      }
+    });
+
+    // Fetch dynamic WS URL from config endpoint, then connect
+    fetch("http://localhost:8787/plugin/config.json")
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (cfg) {
+        if (cfg && cfg.ws_url) wsUrl = cfg.ws_url;
+        connect();
+      })
+      .catch(function () {
+        console.warn("[Penpot MCP] config.json unavailable, using default:", wsUrl);
+        connect();
+      });
+  </script>
+</body>
+</html>

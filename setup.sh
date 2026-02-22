@@ -188,12 +188,12 @@ echo ""
 echo '  {'
 echo '    "mcpServers": {'
 echo '      "penpot": {'
-echo '        "type": "streamable-http",'
+echo '        "type": "http",'
 echo "        \"url\": \"http://localhost:${mcp_port}/mcp\""
 echo '      }'
 echo '    }'
 echo '  }'
 echo ""
-echo "Then restart Claude Code and run /mcp to verify 66 tools are loaded."
+echo "Then restart Claude Code and run /mcp to verify 68 tools are loaded."
 echo ""
 info "Done!"

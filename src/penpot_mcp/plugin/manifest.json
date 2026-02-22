@@ -1,0 +1,12 @@
+{
+  "name": "Penpot MCP",
+  "description": "AI-powered interactive bridge for Penpot MCP Server",
+  "host": "http://localhost:8787",
+  "code": "plugin/plugin.js",
+  "icon": "",
+  "permissions": [
+    "content:read",
+    "content:write",
+    "allow:downloads"
+  ]
+}

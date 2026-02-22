@@ -19,6 +19,7 @@ RUN uv sync --no-dev
 
 # Expose MCP port
 EXPOSE 8787
+EXPOSE 4402
 
 # Run the MCP server
 CMD ["uv", "run", "penpot-mcp"]

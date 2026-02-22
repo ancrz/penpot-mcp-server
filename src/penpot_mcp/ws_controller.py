@@ -8,13 +8,15 @@ from typing import Any, Dict, Optional
 
 import websockets
 
+from penpot_mcp.config import settings
+
 logger = logging.getLogger(__name__)
 
 
 class PenpotWSController:
     """Manages the WebSocket connection with the Penpot Plugin."""
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 4402):
+    def __init__(self, host: str = "0.0.0.0", port: int = 4402):
         self.host = host
         self.port = port
         self.active_connections: set[Any] = set()
@@ -96,4 +98,4 @@ class PenpotWSController:
 
 
 # Singleton instance
-ws_controller = PenpotWSController()
+ws_controller = PenpotWSController(host=settings.ws_host, port=settings.ws_port)
