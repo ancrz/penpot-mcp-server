@@ -31,41 +31,59 @@ Think of it as the bridge between your AI assistant and your design tool.
 
 ```mermaid
 graph TB
-    AI["AI Agent<br/>(Claude Code, Cursor, etc.)"]
-    MCP["penpot-mcp<br/>Python + FastMCP<br/>:8787"]
-    PG["PostgreSQL<br/>penpot-postgres<br/>:5432"]
-    BE["Penpot Backend<br/>penpot-backend<br/>:6060"]
-    FE["Penpot Frontend<br/>localhost:9001"]
-    EX["Penpot Exporter<br/>penpot-exporter<br/>:6061"]
-    WS["WebSocket Bridge<br/>:4402"]
-    PL["Browser Plugin<br/>plugin.js + ui.html"]
-    US["User's Browser<br/>(Penpot open)"]
+    AI["AI Agent\n(Claude Code · Cursor · Gemini CLI)"]
 
-    AI -->|"Streamable HTTP"| MCP
-    MCP -->|"Direct SQL reads<br/>(asyncpg)"| PG
-    MCP -->|"RPC API writes<br/>(httpx)"| BE
-    MCP -->|"Export requests"| BE
-    BE -->|"Render"| EX
-    FE -->|"Proxy"| BE
+    subgraph SERVERS["MCP Layer"]
+        MCP["penpot-mcp — Python\n68 tools · :8787\nDB reads + API writes + Plugin"]
+        OMCP["Penpot MCP — Official\n~20 tools · penpot/penpot monorepo\nPlugin API only · TypeScript"]
+    end
+
+    subgraph PENPOT["Penpot Stack (Docker)"]
+        PG["PostgreSQL\n:5432"]
+        BE["Backend\n:6060"]
+        FE["Frontend\n:9001"]
+        EX["Exporter\n:6061"]
+    end
+
+    subgraph BRIDGE["Browser Plugin Bridge"]
+        WS["WebSocket Server\n:4402"]
+        UI["ui.html\niframe · full browser API"]
+        PJ["plugin.js\nworker sandbox · penpot.*"]
+    end
+
+    AI -->|"Streamable HTTP :8787"| MCP
+    AI -->|"Streamable HTTP"| OMCP
+
+    MCP -->|"asyncpg · direct SQL"| PG
+    MCP -->|"httpx · RPC API"| BE
+    MCP -->|"PNG / SVG export"| EX
     MCP <-->|"WebSocket"| WS
-    WS <-->|"ws://localhost:4402"| PL
-    PL -->|"Penpot Plugin API"| US
+
+    OMCP <-->|"WebSocket :4402"| WS
+
+    WS <-->|"ws://localhost:4402"| UI
+    UI <-->|"postMessage"| PJ
+    PJ -->|"penpot.* API"| FE
+    FE -.->|"proxy"| BE
+    BE --> EX
 
     style AI fill:#7c3aed,color:#fff
     style MCP fill:#2563eb,color:#fff
+    style OMCP fill:#0f766e,color:#fff
     style PG fill:#16a34a,color:#fff
     style BE fill:#ea580c,color:#fff
     style FE fill:#ea580c,color:#fff
     style EX fill:#ea580c,color:#fff
     style WS fill:#0891b2,color:#fff
-    style PL fill:#0891b2,color:#fff
-    style US fill:#475569,color:#fff
+    style UI fill:#0891b2,color:#fff
+    style PJ fill:#0891b2,color:#fff
 ```
 
-**Dual-access strategy:**
-- **Reads** go directly to PostgreSQL via `asyncpg` — fast and reliable
+**Tri-layer access strategy:**
+- **Reads** go directly to PostgreSQL via `asyncpg` — fast and reliable, bypasses API overhead
 - **Writes** go through Penpot's RPC API via `httpx` — ensures proper change tracking and undo history
 - **Exports** use Penpot's built-in exporter (headless Chromium) for pixel-perfect SVG/PNG output
+- **Live canvas** goes through the Browser Plugin bridge (port 4402) — shared architecture with the [official Penpot MCP](https://github.com/penpot/penpot/tree/develop/mcp), enabling both servers to coexist and complement each other in the same AI workflow
 
 ---
 
