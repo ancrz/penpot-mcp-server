@@ -21,10 +21,16 @@ async def lifespan(server: FastMCP):
     logger.info("Connecting to Penpot services...")
     await db.connect()
     await api.connect()
+
+    from penpot_mcp.ws_controller import ws_controller
+
+    await ws_controller.start()
+
     logger.info("Penpot MCP server ready")
     try:
         yield
     finally:
+        await ws_controller.stop()
         await api.close()
         await db.close()
         logger.info("Penpot MCP server stopped")
@@ -46,6 +52,7 @@ mcp = FastMCP(
 # ═══════════════════════════════════════════════════════════════
 # Category 1: Projects & Teams
 # ═══════════════════════════════════════════════════════════════
+
 
 @mcp.tool()
 async def list_teams() -> str:
@@ -98,6 +105,7 @@ async def search_files(query: str) -> str:
 # ═══════════════════════════════════════════════════════════════
 # Category 2: File Operations
 # ═══════════════════════════════════════════════════════════════
+
 
 @mcp.tool()
 async def get_file_summary(file_id: str) -> str:
@@ -225,6 +233,7 @@ async def delete_file(file_id: str) -> str:
 # Category 3: Shapes — Reading
 # ═══════════════════════════════════════════════════════════════
 
+
 @mcp.tool()
 async def get_page_objects(
     file_id: str, page_id: str, shape_type: str | None = None
@@ -236,9 +245,11 @@ async def get_page_objects(
         page_id: The page UUID.
         shape_type: Filter — rect, circle, frame, text, group, path, image, svg-raw, bool.
     """
-    from penpot_mcp.tools.shapes import get_page_objects as _get_page_objects
+    from penpot_mcp.gateway import gateway
 
-    result = await _get_page_objects(file_id, page_id, shape_type)
+    result = await gateway.execute_intent(
+        "get_page_objects", file_id=file_id, page_id=page_id, shape_type=shape_type
+    )
     return json.dumps(result, indent=2)
 
 
@@ -254,9 +265,11 @@ async def get_shape_tree(
         root_id: Start from this shape ID (omit for page root).
         depth: Max tree depth (default 3).
     """
-    from penpot_mcp.tools.shapes import get_shape_tree as _get_shape_tree
+    from penpot_mcp.gateway import gateway
 
-    result = await _get_shape_tree(file_id, page_id, root_id, depth)
+    result = await gateway.execute_intent(
+        "get_shape_tree", file_id=file_id, page_id=page_id, root_id=root_id, depth=depth
+    )
     return json.dumps(result, indent=2)
 
 
@@ -312,7 +325,9 @@ async def get_shape_css(file_id: str, page_id: str, shape_id: str) -> str:
     if "error" in shape:
         return json.dumps(shape)
     css = shape_to_css_string(shape)
-    return json.dumps({"shape_id": shape_id, "name": shape.get("name"), "css": css}, indent=2)
+    return json.dumps(
+        {"shape_id": shape_id, "name": shape.get("name"), "css": css}, indent=2
+    )
 
 
 @mcp.tool()
@@ -333,12 +348,15 @@ async def get_shape_svg(file_id: str, page_id: str, shape_id: str) -> str:
     if "error" in shape:
         return json.dumps(shape)
     svg = shape_to_svg(shape)
-    return json.dumps({"shape_id": shape_id, "name": shape.get("name"), "svg": svg}, indent=2)
+    return json.dumps(
+        {"shape_id": shape_id, "name": shape.get("name"), "svg": svg}, indent=2
+    )
 
 
 # ═══════════════════════════════════════════════════════════════
 # Category 4: Components & Design Tokens
 # ═══════════════════════════════════════════════════════════════
+
 
 @mcp.tool()
 async def get_component_instances(file_id: str) -> str:
@@ -396,6 +414,7 @@ async def get_typography_library(file_id: str) -> str:
 # Category 5: Comments & Collaboration
 # ═══════════════════════════════════════════════════════════════
 
+
 @mcp.tool()
 async def get_comments(file_id: str, resolved: bool | None = None) -> str:
     """Get all comments on a file.
@@ -438,7 +457,12 @@ async def get_share_links(file_id: str) -> str:
 
 @mcp.tool()
 async def create_comment(
-    file_id: str, page_id: str, content: str, x: float, y: float, frame_id: str | None = None
+    file_id: str,
+    page_id: str,
+    content: str,
+    x: float,
+    y: float,
+    frame_id: str | None = None,
 ) -> str:
     """Create a new comment on a page at a specific position.
 
@@ -488,6 +512,7 @@ async def resolve_comment(thread_id: str, resolved: bool = True) -> str:
 # Category 6: Media & Fonts
 # ═══════════════════════════════════════════════════════════════
 
+
 @mcp.tool()
 async def list_media_assets(file_id: str) -> str:
     """List all media assets (images) in a file.
@@ -533,6 +558,7 @@ async def upload_media(file_id: str, name: str, url: str) -> str:
 # Category 7: Database & Advanced
 # ═══════════════════════════════════════════════════════════════
 
+
 @mcp.tool()
 async def query_database(sql: str) -> str:
     """Execute a read-only SQL query against the Penpot database.
@@ -572,6 +598,7 @@ async def get_profile() -> str:
 # Category 8: Snapshots
 # ═══════════════════════════════════════════════════════════════
 
+
 @mcp.tool()
 async def create_snapshot(file_id: str, label: str) -> str:
     """Create a named snapshot (version) of a file.
@@ -599,6 +626,7 @@ async def get_snapshots(file_id: str) -> str:
 # Category 8b: Export
 # ═══════════════════════════════════════════════════════════════
 
+
 @mcp.tool()
 async def export_frame_png(
     file_id: str, page_id: str, object_id: str, scale: float = 1.0
@@ -620,9 +648,7 @@ async def export_frame_png(
 
 
 @mcp.tool()
-async def export_frame_svg(
-    file_id: str, page_id: str, object_id: str
-) -> str:
+async def export_frame_svg(file_id: str, page_id: str, object_id: str) -> str:
     """Export a frame or shape to SVG.
 
     Uses Penpot's exporter for pixel-perfect SVG; falls back to local
@@ -642,6 +668,7 @@ async def export_frame_svg(
 # ═══════════════════════════════════════════════════════════════
 # Category 8c: Advanced Analysis
 # ═══════════════════════════════════════════════════════════════
+
 
 @mcp.tool()
 async def get_file_raw_data(file_id: str, page_id: str | None = None) -> str:
@@ -684,6 +711,7 @@ async def compare_revisions(
 # Category 9: Shape Creation
 # ═══════════════════════════════════════════════════════════════
 
+
 @mcp.tool()
 async def create_rectangle(
     file_id: str,
@@ -722,9 +750,20 @@ async def create_rectangle(
     from penpot_mcp.tools.create import create_rectangle as _create
 
     result = await _create(
-        file_id, page_id, x, y, width, height, name,
-        fill_color, fill_opacity, stroke_color, stroke_width,
-        opacity, border_radius, parent_id,
+        file_id,
+        page_id,
+        x,
+        y,
+        width,
+        height,
+        name,
+        fill_color,
+        fill_opacity,
+        stroke_color,
+        stroke_width,
+        opacity,
+        border_radius,
+        parent_id,
     )
     return json.dumps(result, indent=2, default=str)
 
@@ -769,9 +808,21 @@ async def create_frame(
     from penpot_mcp.tools.create import create_frame as _create
 
     result = await _create(
-        file_id, page_id, x, y, width, height, name,
-        fill_color, fill_opacity, stroke_color, stroke_width,
-        opacity, border_radius, clip_content, parent_id,
+        file_id,
+        page_id,
+        x,
+        y,
+        width,
+        height,
+        name,
+        fill_color,
+        fill_opacity,
+        stroke_color,
+        stroke_width,
+        opacity,
+        border_radius,
+        clip_content,
+        parent_id,
     )
     return json.dumps(result, indent=2, default=str)
 
@@ -812,9 +863,19 @@ async def create_ellipse(
     from penpot_mcp.tools.create import create_ellipse as _create
 
     result = await _create(
-        file_id, page_id, x, y, width, height, name,
-        fill_color, fill_opacity, stroke_color, stroke_width,
-        opacity, parent_id,
+        file_id,
+        page_id,
+        x,
+        y,
+        width,
+        height,
+        name,
+        fill_color,
+        fill_opacity,
+        stroke_color,
+        stroke_width,
+        opacity,
+        parent_id,
     )
     return json.dumps(result, indent=2, default=str)
 
@@ -869,10 +930,26 @@ async def create_text(
     from penpot_mcp.tools.create import create_text as _create
 
     result = await _create(
-        file_id, page_id, text, x, y, width, height, name,
-        font_family, font_size, font_weight, font_style,
-        fill_color, fill_opacity, text_align, line_height,
-        letter_spacing, text_decoration, opacity, parent_id,
+        file_id,
+        page_id,
+        text,
+        x,
+        y,
+        width,
+        height,
+        name,
+        font_family,
+        font_size,
+        font_weight,
+        font_style,
+        fill_color,
+        fill_opacity,
+        text_align,
+        line_height,
+        letter_spacing,
+        text_decoration,
+        opacity,
+        parent_id,
     )
     return json.dumps(result, indent=2, default=str)
 
@@ -907,9 +984,16 @@ async def create_path(
     from penpot_mcp.tools.create import create_path as _create
 
     result = await _create(
-        file_id, page_id, segments, name,
-        fill_color, fill_opacity, stroke_color, stroke_width,
-        opacity, parent_id,
+        file_id,
+        page_id,
+        segments,
+        name,
+        fill_color,
+        fill_opacity,
+        stroke_color,
+        stroke_width,
+        opacity,
+        parent_id,
     )
     return json.dumps(result, indent=2, default=str)
 
@@ -976,10 +1060,9 @@ async def create_page(file_id: str, name: str = "New Page") -> str:
 # Category 10: Shape Modification
 # ═══════════════════════════════════════════════════════════════
 
+
 @mcp.tool()
-async def modify_shape(
-    file_id: str, page_id: str, shape_id: str, attrs: dict
-) -> str:
+async def modify_shape(file_id: str, page_id: str, shape_id: str, attrs: dict) -> str:
     """Modify arbitrary attributes of a shape.
 
     Args:
@@ -1033,9 +1116,7 @@ async def resize_shape(
 
 
 @mcp.tool()
-async def delete_shape(
-    file_id: str, page_id: str, shape_id: str
-) -> str:
+async def delete_shape(file_id: str, page_id: str, shape_id: str) -> str:
     """Delete a shape from a page.
 
     Args:
@@ -1050,9 +1131,7 @@ async def delete_shape(
 
 
 @mcp.tool()
-async def rename_shape(
-    file_id: str, page_id: str, shape_id: str, name: str
-) -> str:
+async def rename_shape(file_id: str, page_id: str, shape_id: str, name: str) -> str:
     """Rename a shape.
 
     Args:
@@ -1069,8 +1148,11 @@ async def rename_shape(
 
 @mcp.tool()
 async def set_fill(
-    file_id: str, page_id: str, shape_id: str,
-    color: str = "#B1B2B5", opacity: float = 1.0,
+    file_id: str,
+    page_id: str,
+    shape_id: str,
+    color: str = "#B1B2B5",
+    opacity: float = 1.0,
 ) -> str:
     """Set the fill color of a shape.
 
@@ -1089,9 +1171,13 @@ async def set_fill(
 
 @mcp.tool()
 async def set_stroke(
-    file_id: str, page_id: str, shape_id: str,
-    color: str = "#000000", width: float = 1.0,
-    opacity: float = 1.0, style: str = "solid",
+    file_id: str,
+    page_id: str,
+    shape_id: str,
+    color: str = "#000000",
+    width: float = 1.0,
+    opacity: float = 1.0,
+    style: str = "solid",
 ) -> str:
     """Set the stroke (border) of a shape.
 
@@ -1111,9 +1197,7 @@ async def set_stroke(
 
 
 @mcp.tool()
-async def set_opacity(
-    file_id: str, page_id: str, shape_id: str, opacity: float
-) -> str:
+async def set_opacity(file_id: str, page_id: str, shape_id: str, opacity: float) -> str:
     """Set the overall opacity of a shape.
 
     Args:
@@ -1130,9 +1214,13 @@ async def set_opacity(
 
 @mcp.tool()
 async def set_layout(
-    file_id: str, page_id: str, frame_id: str,
-    layout_type: str = "flex", direction: str = "row",
-    gap: float = 0, padding: float = 0,
+    file_id: str,
+    page_id: str,
+    frame_id: str,
+    layout_type: str = "flex",
+    direction: str = "row",
+    gap: float = 0,
+    padding: float = 0,
     align_items: str | None = None,
     justify_content: str | None = None,
     wrap: str = "nowrap",
@@ -1154,16 +1242,27 @@ async def set_layout(
     from penpot_mcp.tools.modify import set_layout as _set_layout
 
     result = await _set_layout(
-        file_id, page_id, frame_id, layout_type, direction,
-        gap, padding, align_items, justify_content, wrap,
+        file_id,
+        page_id,
+        frame_id,
+        layout_type,
+        direction,
+        gap,
+        padding,
+        align_items,
+        justify_content,
+        wrap,
     )
     return json.dumps(result, indent=2, default=str)
 
 
 @mcp.tool()
 async def reorder_shapes(
-    file_id: str, page_id: str, parent_id: str,
-    shape_ids: list[str], index: int = 0,
+    file_id: str,
+    page_id: str,
+    parent_id: str,
+    shape_ids: list[str],
+    index: int = 0,
 ) -> str:
     """Reorder shapes within a parent (z-order).
 
@@ -1210,14 +1309,69 @@ async def rename_page(file_id: str, page_id: str, name: str) -> str:
 
 
 # ═══════════════════════════════════════════════════════════════
+# Category 10: Interactive Mode (WebSocket)
+# ═══════════════════════════════════════════════════════════════
+
+
+@mcp.tool()
+async def get_active_selection() -> str:
+    """Get the UUIDs of the shapes currently selected by the user in the Penpot Plugin.
+
+    This requires the user to have the Penpot MCP Plugin open and connected in their browser.
+    """
+    from penpot_mcp.gateway import gateway
+
+    if not gateway.is_interactive:
+        return json.dumps(
+            {
+                "error": "No active Penpot Plugin connection found. The user must have the plugin open."
+            },
+            indent=2,
+        )
+
+    return json.dumps({"selected_shape_ids": gateway.active_selection}, indent=2)
+
+
+@mcp.tool()
+async def execute_plugin_script(script: str) -> str:
+    """Execute a JavaScript snippet directly within the user's Penpot Plugin environment.
+
+    This allows direct manipulation of the canvas using the Penpot Plugin API.
+
+    Args:
+        script: The JavaScript code to execute.
+    """
+    from penpot_mcp.ws_controller import ws_controller
+
+    if not ws_controller.is_connected:
+        return json.dumps(
+            {"error": "No active Penpot Plugin connection found."}, indent=2
+        )
+
+    success = await ws_controller.send_command(script)
+    if success:
+        return json.dumps(
+            {"status": "Script executed (or broadcasted) successfully."}, indent=2
+        )
+    else:
+        return json.dumps({"error": "Failed to send script."}, indent=2)
+
+
+# ═══════════════════════════════════════════════════════════════
 # Category 11: Text Operations
 # ═══════════════════════════════════════════════════════════════
 
+
 @mcp.tool()
 async def set_text_content(
-    file_id: str, page_id: str, shape_id: str, text: str,
-    font_family: str | None = None, font_size: int | None = None,
-    font_weight: str | None = None, fill_color: str | None = None,
+    file_id: str,
+    page_id: str,
+    shape_id: str,
+    text: str,
+    font_family: str | None = None,
+    font_size: int | None = None,
+    font_weight: str | None = None,
+    fill_color: str | None = None,
     text_align: str | None = None,
 ) -> str:
     """Replace text content of a text shape.
@@ -1236,16 +1390,21 @@ async def set_text_content(
     from penpot_mcp.tools.text import set_text_content as _set
 
     result = await _set(
-        file_id, page_id, shape_id, text,
-        font_family, font_size, font_weight, fill_color, text_align,
+        file_id,
+        page_id,
+        shape_id,
+        text,
+        font_family,
+        font_size,
+        font_weight,
+        fill_color,
+        text_align,
     )
     return json.dumps(result, indent=2, default=str)
 
 
 @mcp.tool()
-async def set_font(
-    file_id: str, page_id: str, shape_id: str, font_family: str
-) -> str:
+async def set_font(file_id: str, page_id: str, shape_id: str, font_family: str) -> str:
     """Change the font family of a text shape.
 
     Args:
@@ -1279,9 +1438,7 @@ async def set_font_size(
 
 
 @mcp.tool()
-async def set_text_align(
-    file_id: str, page_id: str, shape_id: str, align: str
-) -> str:
+async def set_text_align(file_id: str, page_id: str, shape_id: str, align: str) -> str:
     """Set text alignment.
 
     Args:
@@ -1298,7 +1455,9 @@ async def set_text_align(
 
 @mcp.tool()
 async def set_text_style(
-    file_id: str, page_id: str, shape_id: str,
+    file_id: str,
+    page_id: str,
+    shape_id: str,
     font_weight: str | None = None,
     font_style: str | None = None,
     text_decoration: str | None = None,
@@ -1316,8 +1475,12 @@ async def set_text_style(
     from penpot_mcp.tools.text import set_text_style as _set
 
     result = await _set(
-        file_id, page_id, shape_id,
-        font_weight, font_style, text_decoration,
+        file_id,
+        page_id,
+        shape_id,
+        font_weight,
+        font_style,
+        text_decoration,
     )
     return json.dumps(result, indent=2, default=str)
 
@@ -1325,6 +1488,7 @@ async def set_text_style(
 # ═══════════════════════════════════════════════════════════════
 # Entry point
 # ═══════════════════════════════════════════════════════════════
+
 
 def main():
     """Run the Penpot MCP server."""

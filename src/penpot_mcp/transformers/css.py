@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 
 def shape_to_css(shape: dict) -> dict[str, str]:
     """Convert a Penpot shape's visual properties to CSS properties.
@@ -39,7 +37,6 @@ def shape_to_css(shape: dict) -> dict[str, str]:
     r3 = shape.get("r3")
     r4 = shape.get("r4")
     rx = shape.get("rx")
-    ry = shape.get("ry")
 
     if r1 is not None and r2 is not None and r3 is not None and r4 is not None:
         if r1 == r2 == r3 == r4:
@@ -135,7 +132,11 @@ def _hex_to_rgba(hex_color: str, opacity: float) -> str:
     """Convert hex color + opacity to rgba()."""
     hex_color = hex_color.lstrip("#")
     if len(hex_color) == 6:
-        r, g, b = int(hex_color[:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
+        r, g, b = (
+            int(hex_color[:2], 16),
+            int(hex_color[2:4], 16),
+            int(hex_color[4:6], 16),
+        )
         return f"rgba({r}, {g}, {b}, {round(opacity, 3)})"
     return hex_color
 
@@ -203,7 +204,12 @@ def _layout_to_css(shape: dict) -> dict[str, str]:
 
     align = shape.get("layout-align-items")
     if align:
-        align_map = {"start": "flex-start", "center": "center", "end": "flex-end", "stretch": "stretch"}
+        align_map = {
+            "start": "flex-start",
+            "center": "center",
+            "end": "flex-end",
+            "stretch": "stretch",
+        }
         css["align-items"] = align_map.get(align, align)
 
     justify = shape.get("layout-justify-content")

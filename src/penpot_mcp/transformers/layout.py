@@ -88,7 +88,7 @@ def layout_to_css_class(shape: dict) -> str:
     lines = [f".{name} {{"]
 
     if analysis["type"] == "flex":
-        lines.append(f"  display: flex;")
+        lines.append("  display: flex;")
         lines.append(f"  flex-direction: {analysis['css_flex_direction']};")
         lines.append(f"  gap: {analysis['css_gap']};")
         lines.append(f"  padding: {analysis['css_padding']};")
@@ -98,7 +98,7 @@ def layout_to_css_class(shape: dict) -> str:
             lines.append(f"  justify-content: {analysis['css_justify_content']};")
         lines.append(f"  flex-wrap: {analysis['css_flex_wrap']};")
     elif analysis["type"] == "grid":
-        lines.append(f"  display: grid;")
+        lines.append("  display: grid;")
         if analysis.get("css_grid_template_rows"):
             lines.append(f"  grid-template-rows: {analysis['css_grid_template_rows']};")
         if analysis.get("css_grid_template_columns"):

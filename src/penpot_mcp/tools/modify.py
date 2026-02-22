@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any
 
 from penpot_mcp.services.changes import (
     apply_changes,
     build_fill,
-    build_shape_geometry,
     build_stroke,
     change_del_obj,
     change_del_page,

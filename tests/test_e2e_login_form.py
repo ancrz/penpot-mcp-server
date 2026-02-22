@@ -3,7 +3,6 @@
 Creates a complete login form UI component from scratch.
 """
 import json
-import sys
 import httpx
 
 BASE = "http://localhost:8787/mcp"

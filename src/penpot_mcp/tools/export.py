@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import base64
 import logging
-from typing import Any
 
 from penpot_mcp.services.api import api
-from penpot_mcp.tools.shapes import get_shape_details, get_shape_tree
+from penpot_mcp.tools.shapes import get_shape_tree
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +69,7 @@ async def export_frame(
 
 async def _fallback_svg_export(file_id: str, page_id: str, object_id: str) -> dict:
     """Generate SVG locally from shape data when the exporter is unavailable."""
-    from penpot_mcp.transformers.svg import shape_to_svg, shapes_to_svg_document
+    from penpot_mcp.transformers.svg import shapes_to_svg_document
 
     tree = await get_shape_tree(file_id, page_id, root_id=object_id, depth=10)
     if "error" in tree:

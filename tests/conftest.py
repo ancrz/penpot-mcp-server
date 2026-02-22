@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 import pytest_asyncio
 
 from penpot_mcp.services.api import api

@@ -28,7 +28,9 @@ class PenpotAPI:
             follow_redirects=True,
         )
         if settings.has_access_token:
-            self._client.headers["Authorization"] = f"Token {settings.penpot_access_token}"
+            self._client.headers["Authorization"] = (
+                f"Token {settings.penpot_access_token}"
+            )
             logger.info("Authenticated via access token")
         elif settings.has_credentials:
             await self._login()
@@ -36,6 +38,7 @@ class PenpotAPI:
             logger.warning("No authentication configured — API calls may fail")
 
     async def _login(self) -> None:
+        assert self._client is not None, "API client not connected"
         resp = await self._client.post(
             "/api/rpc/command/login-with-password",
             json={"email": settings.penpot_email, "password": settings.penpot_password},
@@ -49,6 +52,7 @@ class PenpotAPI:
 
     async def command(self, method: str, params: dict[str, Any] | None = None) -> Any:
         """Execute an RPC command against Penpot backend."""
+        assert self._client is not None, "API client not connected"
         url = f"/api/rpc/command/{method}"
         if params:
             resp = await self._client.post(url, json=params)
@@ -90,7 +94,9 @@ class PenpotAPI:
         return await self.command("get-files", {"project-id": project_id})
 
     async def create_file(self, project_id: str, name: str) -> dict:
-        return await self.command("create-file", {"project-id": project_id, "name": name})
+        return await self.command(
+            "create-file", {"project-id": project_id, "name": name}
+        )
 
     async def rename_file(self, file_id: str, name: str) -> dict:
         return await self.command("rename-file", {"id": file_id, "name": name})
@@ -148,7 +154,9 @@ class PenpotAPI:
         return await self.command("create-comment-thread", params)
 
     async def create_comment(self, thread_id: str, content: str) -> dict:
-        return await self.command("create-comment", {"thread-id": thread_id, "content": content})
+        return await self.command(
+            "create-comment", {"thread-id": thread_id, "content": content}
+        )
 
     async def update_comment_thread(self, thread_id: str, is_resolved: bool) -> dict:
         return await self.command(
@@ -196,25 +204,28 @@ class PenpotAPI:
         profile_id = profile.get("id")
 
         # Build Transit JSON-Verbose payload
-        transit_body = json.dumps({
-            "~:cmd": "~:export-shapes",
-            "~:profile-id": f"~u{profile_id}",
-            "~:wait": True,
-            "~:exports": [
-                {
-                    "~:page-id": f"~u{page_id}",
-                    "~:file-id": f"~u{file_id}",
-                    "~:object-id": f"~u{object_id}",
-                    "~:type": f"~:{export_type}",
-                    "~:suffix": "",
-                    "~:scale": scale,
-                    "~:name": name,
-                }
-            ],
-        })
+        transit_body = json.dumps(
+            {
+                "~:cmd": "~:export-shapes",
+                "~:profile-id": f"~u{profile_id}",
+                "~:wait": True,
+                "~:exports": [
+                    {
+                        "~:page-id": f"~u{page_id}",
+                        "~:file-id": f"~u{file_id}",
+                        "~:object-id": f"~u{object_id}",
+                        "~:type": f"~:{export_type}",
+                        "~:suffix": "",
+                        "~:scale": scale,
+                        "~:name": name,
+                    }
+                ],
+            }
+        )
 
         # The exporter uses cookie auth — extract from client's cookie jar
         auth_token = None
+        assert self._client is not None, "API client not connected"
         for cookie in self._client.cookies.jar:
             if cookie.name == "auth-token":
                 auth_token = cookie.value
