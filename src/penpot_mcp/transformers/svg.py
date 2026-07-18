@@ -44,17 +44,37 @@ def shape_to_svg(shape: dict) -> str:
         from penpot_mcp.tools.shapes import _extract_text_content
 
         text = _extract_text_content(shape.get("content", {}))
-        font_size = 16
+        font_size: float | str = 16
+        font_weight: str = "400"
         content = shape.get("content", {})
-        if isinstance(content, dict):
-            for child in content.get("children", []):
-                for text_child in child.get("children", []):
-                    if "font-size" in text_child:
-                        font_size = text_child["font-size"]
-                        break
+
+        def find_text_style(node: Any) -> dict | None:
+            if isinstance(node, dict):
+                if "text" in node or "font-size" in node:
+                    return node
+                for child in node.get("children", []):
+                    if (result := find_text_style(child)) is not None:
+                        return result
+            elif isinstance(node, list):
+                for child in node:
+                    if (result := find_text_style(child)) is not None:
+                        return result
+            return None
+
+        text_style = find_text_style(content) or {}
+        font_size = text_style.get("font-size", font_size)
+        font_weight = str(text_style.get("font-weight", font_weight))
+        numeric_font_size = float(font_size)
+        text_fills = shape.get("fills", []) or text_style.get("fills", [])
+        text_attrs = (
+            f"{_fills_to_svg(text_fills)}"
+            f"{_opacity_attr(shape.get('opacity', 1))}"
+            f"{_transform_attr(shape)}"
+        )
         return (
-            f'<text x="{x}" y="{y + font_size}" '
-            f'font-size="{font_size}"{attrs}>{_escape_xml(text)}</text>'
+            f'<text x="{x}" y="{y + numeric_font_size}" '
+            f'font-size="{font_size}" font-weight="{font_weight}"'
+            f'{text_attrs}>{_escape_xml(text)}</text>'
         )
 
     if shape_type == "path":

@@ -272,7 +272,7 @@ async def apply_changes(
 
     info = await get_file_info(file_id)
 
-    result = await api.update_file(
+    result = await api.update_file_transit(
         file_id=file_id,
         session_id=session_id,
         revn=info["revn"],

@@ -6,7 +6,6 @@ import base64
 import logging
 
 from penpot_mcp.services.api import api
-from penpot_mcp.tools.shapes import get_shape_tree
 
 logger = logging.getLogger(__name__)
 
@@ -70,15 +69,29 @@ async def export_frame(
 async def _fallback_svg_export(file_id: str, page_id: str, object_id: str) -> dict:
     """Generate SVG locally from shape data when the exporter is unavailable."""
     from penpot_mcp.transformers.svg import shapes_to_svg_document
+    from penpot_mcp.tools.shapes import _get_file_data, _get_page_objects
 
-    tree = await get_shape_tree(file_id, page_id, root_id=object_id, depth=10)
-    if "error" in tree:
-        return tree
+    file_data = await _get_file_data(file_id)
+    objects = _get_page_objects(file_data, page_id)
+    root = objects.get(object_id)
+    if not root:
+        return {"error": f"Shape {object_id} not found on page {page_id}"}
 
-    # Collect all shapes from the tree for SVG rendering
-    shapes = _flatten_tree(tree)
-    w = tree.get("width", 1920)
-    h = tree.get("height", 1080)
+    # Use full shape records rather than get_shape_tree's brief projection;
+    # fills, strokes, text content, and radii are required for a useful render.
+    shapes: list[dict] = []
+
+    def collect(shape_id: str) -> None:
+        shape = objects.get(shape_id)
+        if not shape:
+            return
+        shapes.append(shape)
+        for child_id in shape.get("shapes", []):
+            collect(child_id)
+
+    collect(object_id)
+    w = root.get("width", 1920)
+    h = root.get("height", 1080)
 
     svg = shapes_to_svg_document(shapes, width=w, height=h)
     return {
@@ -88,16 +101,6 @@ async def _fallback_svg_export(file_id: str, page_id: str, object_id: str) -> di
         "content": svg,
         "note": "Generated locally from shape data (exporter unavailable)",
     }
-
-
-def _flatten_tree(node: dict) -> list[dict]:
-    """Flatten a shape tree into a list of shapes."""
-    shapes = [node]
-    for child in node.get("children", []):
-        shapes.extend(_flatten_tree(child))
-    return shapes
-
-
 async def export_frame_png(
     file_id: str,
     page_id: str,

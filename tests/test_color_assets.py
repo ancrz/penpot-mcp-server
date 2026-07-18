@@ -160,3 +160,98 @@ async def test_update_color_defaults_missing_opacity_to_one(
     assert update_file.await_args.kwargs["changes"] == [
         {"type": "mod-color", "color": result}
     ]
+
+
+@pytest.mark.asyncio
+async def test_create_color_with_gradient(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(color_tools, "new_uuid", lambda: COLOR_ID)
+    monkeypatch.setattr(color_tools, "get_file_info", AsyncMock(return_value=FILE_INFO))
+    update_file = AsyncMock(return_value={"revn": 43})
+    monkeypatch.setattr(color_tools.api, "update_file_transit", update_file)
+
+    gradient_data = {
+        "type": "linear",
+        "stops": [
+            {"color": "#FFFFFF", "opacity": 1.0, "offset": 0.0},
+            {"color": "#000000", "opacity": 0.5, "offset": 1.0},
+        ],
+    }
+
+    result = await color_tools.create_color(
+        FILE_ID,
+        name="LinearGrad",
+        gradient=gradient_data,
+        path="Gradients",
+    )
+
+    assert result["id"] == COLOR_ID
+    assert result["name"] == "LinearGrad"
+    assert result["path"] == "Gradients"
+    assert "color" not in result
+    assert result["gradient"]["type"] == "linear"
+    assert result["gradient"]["stops"][0]["color"] == "#ffffff"
+    assert result["gradient"]["stops"][1]["opacity"] == 0.5
+
+    kwargs = update_file.await_args.kwargs
+    assert kwargs["changes"] == [
+        {"type": "add-color", "color": result}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_update_color_with_gradient(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    existing = {
+        "id": COLOR_ID,
+        "name": "LinearGrad",
+        "path": "Gradients",
+        "gradient": {
+            "type": "linear",
+            "stops": [{"color": "#ffffff", "offset": 0}, {"color": "#000000", "offset": 1}],
+        },
+    }
+    monkeypatch.setattr(
+        color_tools, "get_colors_library", AsyncMock(return_value=[existing])
+    )
+    monkeypatch.setattr(color_tools, "get_file_info", AsyncMock(return_value=FILE_INFO))
+    update_file = AsyncMock(return_value={"revn": 43})
+    monkeypatch.setattr(color_tools.api, "update_file_transit", update_file)
+
+    new_gradient = {
+        "type": "radial",
+        "stops": [
+            {"color": "#FF0000", "offset": 0.0},
+            {"color": "#0000FF", "offset": 1.0},
+        ],
+    }
+
+    result = await color_tools.update_color(
+        FILE_ID,
+        COLOR_ID,
+        gradient=new_gradient,
+    )
+
+    assert result["gradient"]["type"] == "radial"
+    assert result["gradient"]["stops"][0]["color"] == "#ff0000"
+    assert "color" not in result
+
+    assert update_file.await_args.kwargs["changes"] == [
+        {"type": "mod-color", "color": result}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_create_color_validates_mutually_exclusive_inputs() -> None:
+    gradient_data = {
+        "type": "linear",
+        "stops": [{"color": "#FFFFFF", "offset": 0.0}],
+    }
+    with pytest.raises(ValueError, match="Cannot specify both color and gradient"):
+        await color_tools.create_color(FILE_ID, "Invalid", color="#FFFFFF", gradient=gradient_data)
+
+    with pytest.raises(ValueError, match="Must specify either color or gradient"):
+        await color_tools.create_color(FILE_ID, "Invalid")
+

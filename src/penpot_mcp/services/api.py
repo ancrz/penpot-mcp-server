@@ -35,7 +35,9 @@ _UUID_VALUE_KEYS = frozenset(
 
 
 def _is_uuid_value(key: str | None, parent: dict | None) -> bool:
-    if key in _UUID_VALUE_KEYS or (key and key.endswith("-ids")):
+    if not key:
+        return False
+    if key in _UUID_VALUE_KEYS or key.endswith(("-ids", "-id", "-file")):
         return True
     return bool(key == "val" and parent and str(parent.get("attr", "")).endswith("-id"))
 
@@ -44,6 +46,21 @@ def _escape_transit_string(value: str) -> str:
     if value.startswith(("~", "^")):
         return f"~{value}"
     return value
+
+
+_KEYWORDS_TYPES = {"add-obj", "mod-obj", "del-obj", "add-page", "del-page", "mod-page", "mov-objects", "set"}
+
+_ENUM_VALUE_KEYS = {
+    "stroke-style",
+    "stroke-alignment",
+    "layout",
+    "layout-flex-dir",
+    "layout-align-items",
+    "layout-justify-content",
+    "blend-mode",
+    "constraints-h",
+    "constraints-v",
+}
 
 
 def _encode_transit_value(
@@ -73,7 +90,9 @@ def _encode_transit_value(
     if isinstance(value, str):
         if _UUID_RE.fullmatch(value) and _is_uuid_value(key, parent):
             return f"~u{value}"
-        if key in {"type", "attr"}:
+        if key == "type" and value in _KEYWORDS_TYPES:
+            return f"~:{value}"
+        if key == "attr" or key in _ENUM_VALUE_KEYS:
             return f"~:{value}"
         return _escape_transit_string(value)
     return value

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from penpot_mcp.services.api import api
 from penpot_mcp.services.changes import (
     ROOT_FRAME_ID,
     apply_changes,
@@ -368,12 +369,18 @@ async def create_path(
 
     # Convert segments to Penpot path content format
     content = []
+    command_names = {
+        "M": "move-to",
+        "L": "line-to",
+        "C": "curve-to",
+        "Z": "close-path",
+    }
     for seg in segments:
-        cmd = seg.get("command", "L")
-        entry: dict[str, Any] = {"command": cmd.lower()}
-        if cmd.upper() in ("M", "L"):
+        cmd = str(seg.get("command", "L")).upper()
+        entry: dict[str, Any] = {"command": command_names.get(cmd, "line-to")}
+        if cmd in ("M", "L"):
             entry["params"] = {"x": seg["x"], "y": seg["y"]}
-        elif cmd.upper() == "C":
+        elif cmd == "C":
             entry["params"] = {
                 "c1x": seg.get("c1x", seg["x"]),
                 "c1y": seg.get("c1y", seg["y"]),
@@ -382,7 +389,7 @@ async def create_path(
                 "x": seg["x"],
                 "y": seg["y"],
             }
-        elif cmd.upper() == "Z":
+        elif cmd == "Z":
             entry["params"] = {}
         content.append(entry)
 
@@ -469,7 +476,7 @@ async def create_component(
         shape_id: The shape UUID to convert to a component.
         name: Component name. If omitted, keeps the shape's current name.
     """
-    from penpot_mcp.services.changes import change_mod_obj, set_op
+    from penpot_mcp.services.changes import change_mod_obj, get_file_info, set_op
 
     component_id = new_uuid()
     ops = [
@@ -481,8 +488,25 @@ async def create_component(
     if name:
         ops.append(set_op("name", name))
 
-    change = change_mod_obj(page_id, shape_id, ops)
-    await apply_changes(file_id, [change])
+    component_change = {
+        "type": "add-component",
+        "id": component_id,
+        "path": "",
+        "name": name or "Component",
+        "main-instance-id": shape_id,
+        "main-instance-page": page_id,
+        "annotation": None,
+    }
+    shape_change = change_mod_obj(page_id, shape_id, ops)
+    info = await get_file_info(file_id)
+    await api.update_file_transit(
+        file_id=file_id,
+        session_id=new_uuid(),
+        revn=info["revn"],
+        vern=info["vern"],
+        changes=[component_change, shape_change],
+        features=info["features"],
+    )
     return {"component_id": component_id, "shape_id": shape_id, "name": name}
 
 

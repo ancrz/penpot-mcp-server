@@ -475,22 +475,24 @@ async def get_colors_library(file_id: str) -> str:
 async def create_color(
     file_id: str,
     name: str,
-    color: str,
+    color: str | None = None,
     opacity: float = 1.0,
     path: str = "",
+    gradient: dict | None = None,
 ) -> str:
-    """Create a native color asset in a file's local library.
+    """Create a native color asset (solid color or gradient) in a file's local library.
 
     Args:
         file_id: The file UUID.
         name: Asset name within its path, such as "Primary".
-        color: 3- or 6-digit hexadecimal color, such as "#DFFB73".
+        color: Optional 3- or 6-digit hexadecimal color, such as "#DFFB73".
         opacity: Color opacity from 0 to 1 (default 1).
         path: Optional slash-separated asset group, such as "Accent".
+        gradient: Optional gradient dictionary containing type (linear/radial) and stops.
     """
     from penpot_mcp.tools.colors import create_color as _create_color
 
-    result = await _create_color(file_id, name, color, opacity, path)
+    result = await _create_color(file_id, name, color, opacity, path, gradient)
     return json.dumps(result, indent=2)
 
 
@@ -502,6 +504,7 @@ async def update_color(
     color: str | None = None,
     opacity: float | None = None,
     path: str | None = None,
+    gradient: dict | None = None,
 ) -> str:
     """Update or rename a native color asset, preserving unspecified fields.
 
@@ -512,10 +515,11 @@ async def update_color(
         color: Optional new 3- or 6-digit hexadecimal color.
         opacity: Optional opacity from 0 to 1.
         path: Optional slash-separated asset group; pass an empty string for root.
+        gradient: Optional gradient dictionary containing type (linear/radial) and stops.
     """
     from penpot_mcp.tools.colors import update_color as _update_color
 
-    result = await _update_color(file_id, color_id, name, color, opacity, path)
+    result = await _update_color(file_id, color_id, name, color, opacity, path, gradient)
     return json.dumps(result, indent=2)
 
 
@@ -1702,6 +1706,57 @@ async def set_text_style(
         font_style,
         text_decoration,
     )
+    return json.dumps(result, indent=2, default=str)
+
+
+@mcp.tool()
+async def apply_design_token(
+    file_id: str,
+    page_id: str,
+    shape_ids: list[str],
+    token_id: str,
+    token_type: str,
+    target_property: str = "fill",
+) -> str:
+    """Apply a design token (color asset or typography asset) to a list of shapes.
+
+    Args:
+        file_id: The file UUID.
+        page_id: The page UUID containing the shapes.
+        shape_ids: List of shape UUIDs to modify.
+        token_id: The UUID of the color or typography library token.
+        token_type: Token type - "color" or "typography".
+        target_property: Target property - "fill" or "stroke" (applies only to color tokens).
+    """
+    from penpot_mcp.tools.tokens import apply_design_token as _apply
+
+    result = await _apply(
+        file_id,
+        page_id,
+        shape_ids,
+        token_id,
+        token_type,
+        target_property,
+    )
+    return json.dumps(result, indent=2, default=str)
+
+
+@mcp.tool()
+async def auto_bind_library_tokens(
+    file_id: str,
+    page_id: str,
+    shape_ids: list[str] | None = None,
+) -> str:
+    """Automatically search shape styles/colors and bind matching library assets (color or typography tokens).
+
+    Args:
+        file_id: The file UUID.
+        page_id: The page UUID.
+        shape_ids: Optional list of shape UUIDs. If omitted, binds all shapes on the page.
+    """
+    from penpot_mcp.tools.tokens import auto_bind_library_tokens as _bind
+
+    result = await _bind(file_id, page_id, shape_ids)
     return json.dumps(result, indent=2, default=str)
 
 
