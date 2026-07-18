@@ -194,6 +194,6 @@ echo '      }'
 echo '    }'
 echo '  }'
 echo ""
-echo "Then restart Claude Code and run /mcp to verify 68 tools are loaded."
+echo "Then restart Claude Code and run /mcp to verify 74 tools are loaded."
 echo ""
 info "Done!"

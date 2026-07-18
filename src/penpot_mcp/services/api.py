@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 import httpx
@@ -12,6 +13,89 @@ from penpot_mcp.config import settings
 from penpot_mcp.services.transit import decode_transit
 
 logger = logging.getLogger(__name__)
+
+_UUID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+
+_UUID_VALUE_KEYS = frozenset(
+    {
+        "id",
+        "file-id",
+        "frame-id",
+        "main-instance-id",
+        "main-instance-page",
+        "object-id",
+        "page-id",
+        "parent-id",
+        "session-id",
+    }
+)
+
+
+def _is_uuid_value(key: str | None, parent: dict | None) -> bool:
+    if not key:
+        return False
+    if key in _UUID_VALUE_KEYS or key.endswith(("-ids", "-id", "-file")):
+        return True
+    return bool(key == "val" and parent and str(parent.get("attr", "")).endswith("-id"))
+
+
+def _escape_transit_string(value: str) -> str:
+    if value.startswith(("~", "^")):
+        return f"~{value}"
+    return value
+
+
+_KEYWORDS_TYPES = {"add-obj", "mod-obj", "del-obj", "add-page", "del-page", "mod-page", "mov-objects", "set"}
+
+_ENUM_VALUE_KEYS = {
+    "stroke-style",
+    "stroke-alignment",
+    "layout",
+    "layout-flex-dir",
+    "layout-align-items",
+    "layout-justify-content",
+    "blend-mode",
+    "constraints-h",
+    "constraints-v",
+}
+
+
+def _encode_transit_value(
+    value: Any,
+    *,
+    key: str | None = None,
+    parent: dict | None = None,
+) -> Any:
+    """Encode the small Transit subset needed by Penpot change operations.
+
+    JSON requests coerce top-level RPC UUID parameters, but UUIDs embedded in
+    a shape modification remain strings and fail Penpot's shape schema. The
+    update-file endpoint also accepts Transit JSON, where UUIDs and keywords
+    retain their types.
+    """
+    if isinstance(value, dict):
+        return {
+            f"~:{str(item_key)}": _encode_transit_value(
+                item_value,
+                key=str(item_key),
+                parent=value,
+            )
+            for item_key, item_value in value.items()
+        }
+    if isinstance(value, list):
+        return [_encode_transit_value(item, key=key, parent=parent) for item in value]
+    if isinstance(value, str):
+        if _UUID_RE.fullmatch(value) and _is_uuid_value(key, parent):
+            return f"~u{value}"
+        if key == "type" and value in _KEYWORDS_TYPES:
+            return f"~:{value}"
+        if key == "attr" or key in _ENUM_VALUE_KEYS:
+            return f"~:{value}"
+        return _escape_transit_string(value)
+    return value
 
 
 class PenpotAPI:
@@ -132,6 +216,47 @@ class PenpotAPI:
         if features:
             params["features"] = features
         return await self.command("update-file", params)
+
+    async def update_file_transit(
+        self,
+        file_id: str,
+        session_id: str,
+        revn: int,
+        vern: int,
+        changes: list[dict],
+        features: list[str] | None = None,
+    ) -> Any:
+        """Submit typed Transit changes when nested UUID values are required."""
+        assert self._client is not None, "API client not connected"
+        params: dict[str, Any] = {
+            "id": file_id,
+            "session-id": session_id,
+            "revn": revn,
+            "vern": vern,
+            "changes": changes,
+        }
+        if features:
+            params["features"] = features
+        body = json.dumps(_encode_transit_value(params))
+        response = await self._client.post(
+            "/api/rpc/command/update-file",
+            content=body,
+            headers={
+                "Content-Type": "application/transit+json",
+                "Accept": "application/transit+json",
+            },
+        )
+        if response.is_error:
+            raise RuntimeError(
+                f"Penpot Transit update failed ({response.status_code}): "
+                f"{response.text[:2000]}"
+            )
+        content_type = response.headers.get("content-type", "")
+        if "application/transit+json" in content_type:
+            return decode_transit(response.text)
+        if "application/json" in content_type:
+            return response.json()
+        return response.text
 
     # ── Comments ─────────────────────────────────────────────
 

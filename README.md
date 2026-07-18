@@ -5,7 +5,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python 3.13+](https://img.shields.io/badge/Python-3.13+-yellow.svg)](https://python.org)
 [![MCP Protocol](https://img.shields.io/badge/MCP-2025--03--26-green.svg)](https://modelcontextprotocol.io)
-[![Tools: 68](https://img.shields.io/badge/Tools-68-orange.svg)](TOOLS.md)
+[![Tools: 74](https://img.shields.io/badge/Tools-74-orange.svg)](TOOLS.md)
 
 ---
 
@@ -20,7 +20,7 @@ Think of it as the bridge between your AI assistant and your design tool.
 | Problem | Solution |
 |---|---|
 | **Manual design work** | AI creates UI components, layouts, and prototypes directly in Penpot |
-| **No programmatic API for Penpot** | 68 tools covering projects, shapes, text, exports, comments, and more |
+| **No programmatic API for Penpot** | 74 tools covering projects, shapes, text, exports, comments, and more |
 | **Design-to-code gap** | Generate CSS from any shape, export to SVG/PNG, extract design tokens |
 | **Repetitive tasks** | Batch operations — rename shapes, update colors, create variants |
 | **Design system maintenance** | Read/write components, colors, typographies programmatically |
@@ -34,7 +34,7 @@ graph TB
     AI["AI Agent\n(Claude Code · Cursor · Gemini CLI)"]
 
     subgraph SERVERS["MCP Layer"]
-        MCP["penpot-mcp — Python\n68 tools · :8787\nDB reads + API writes + Plugin"]
+        MCP["penpot-mcp — Python\n74 tools · :8787\nDB reads + API writes + Plugin"]
         OMCP["Penpot MCP — Official\n~20 tools · penpot/penpot monorepo\nPlugin API only · TypeScript"]
     end
 
@@ -221,7 +221,7 @@ Claude Code uses `"type": "http"` for streamable HTTP connections.
 }
 ```
 
-Restart Claude Code. You should see **68 tools** from the `penpot` server listed when you run `/mcp`.
+Restart Claude Code. You should see **74 tools** from the `penpot` server listed when you run `/mcp`.
 
 > **Note:** Use `"type": "http"`, not `"streamable-http"`. Claude Code maps `http` to the streamable HTTP transport internally. Using `streamable-http` will cause a schema validation error.
 
@@ -299,7 +299,7 @@ The Penpot MCP Plugin bridges the AI agent with the **live Penpot canvas**, enab
 - **Live selection**: AI can query which shapes you currently have selected
 - **Script execution**: AI can run JavaScript directly via the Penpot Plugin API
 
-> These features require the browser plugin to be connected. The 66 headless tools work without it.
+> These features require the browser plugin to be connected. The 72 headless tools work without it.
 
 ### Loading the Plugin
 
@@ -353,20 +353,20 @@ If no popup appears and the plugin stays disconnected, check `chrome://flags/#pr
 
 ## Tools Overview
 
-The server provides **68 tools** across 11 categories. See [**TOOLS.md**](TOOLS.md) for the complete reference with all parameters.
+The server provides **77 tools** across 13 categories. See [**TOOLS.md**](TOOLS.md) for the complete reference with all parameters.
 
 | Category | Count | Examples |
 |---|---|---|
 | Projects & Teams | 4 | `list_projects`, `list_teams`, `list_files`, `search_files` |
 | File Operations | 9 | `create_file`, `get_file_pages`, `rename_file`, `duplicate_file` |
 | Shape Reading | 6 | `get_shape_tree`, `get_shape_details`, `get_shape_css`, `search_shapes` |
-| Components & Tokens | 4 | `get_design_tokens`, `get_colors_library`, `get_typography_library` |
+| Components & Tokens | 12 | `create_color`, `update_color`, `apply_design_token`, `auto_bind_library_tokens` |
 | Comments | 6 | `create_comment`, `reply_to_comment`, `resolve_comment` |
 | Media & Fonts | 3 | `upload_media`, `list_media_assets`, `list_fonts` |
 | Database & Advanced | 3 | `query_database`, `get_webhooks`, `get_profile` |
 | Snapshots | 2 | `create_snapshot`, `get_snapshots` |
 | Export | 2 | `export_frame_png`, `export_frame_svg` |
-| Shape Creation | 8 | `create_rectangle`, `create_frame`, `create_text`, `create_path` |
+| Shape Creation | 9 | `create_rectangle`, `create_frame`, `create_text`, `create_path`, `create_component_instance` |
 | Shape Modification | 12 | `set_fill`, `set_stroke`, `set_layout`, `move_shape`, `resize_shape` |
 | Text Operations | 5 | `set_text_content`, `set_font`, `set_font_size`, `set_text_align` |
 | Advanced Analysis | 2 | `get_file_raw_data`, `compare_revisions` |
@@ -468,7 +468,7 @@ uv run pytest tests/ -v
 ```
 penpot-mcp-server/
 ├── src/penpot_mcp/
-│   ├── server.py            # FastMCP entry point, 68 tool registrations, plugin routes
+│   ├── server.py            # FastMCP entry point, 74 tool registrations, plugin routes
 │   ├── config.py            # Pydantic Settings configuration
 │   ├── gateway.py           # Hybrid context gateway (DB + Plugin awareness)
 │   ├── ws_controller.py     # WebSocket server for browser plugin bridge (:4402)

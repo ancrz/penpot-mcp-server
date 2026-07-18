@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from penpot_mcp.services.api import api
 from penpot_mcp.services.changes import (
     ROOT_FRAME_ID,
     apply_changes,
@@ -368,12 +369,18 @@ async def create_path(
 
     # Convert segments to Penpot path content format
     content = []
+    command_names = {
+        "M": "move-to",
+        "L": "line-to",
+        "C": "curve-to",
+        "Z": "close-path",
+    }
     for seg in segments:
-        cmd = seg.get("command", "L")
-        entry: dict[str, Any] = {"command": cmd.lower()}
-        if cmd.upper() in ("M", "L"):
+        cmd = str(seg.get("command", "L")).upper()
+        entry: dict[str, Any] = {"command": command_names.get(cmd, "line-to")}
+        if cmd in ("M", "L"):
             entry["params"] = {"x": seg["x"], "y": seg["y"]}
-        elif cmd.upper() == "C":
+        elif cmd == "C":
             entry["params"] = {
                 "c1x": seg.get("c1x", seg["x"]),
                 "c1y": seg.get("c1y", seg["y"]),
@@ -382,7 +389,7 @@ async def create_path(
                 "x": seg["x"],
                 "y": seg["y"],
             }
-        elif cmd.upper() == "Z":
+        elif cmd == "Z":
             entry["params"] = {}
         content.append(entry)
 
@@ -469,7 +476,7 @@ async def create_component(
         shape_id: The shape UUID to convert to a component.
         name: Component name. If omitted, keeps the shape's current name.
     """
-    from penpot_mcp.services.changes import change_mod_obj, set_op
+    from penpot_mcp.services.changes import change_mod_obj, get_file_info, set_op
 
     component_id = new_uuid()
     ops = [
@@ -481,8 +488,25 @@ async def create_component(
     if name:
         ops.append(set_op("name", name))
 
-    change = change_mod_obj(page_id, shape_id, ops)
-    await apply_changes(file_id, [change])
+    component_change = {
+        "type": "add-component",
+        "id": component_id,
+        "path": "",
+        "name": name or "Component",
+        "main-instance-id": shape_id,
+        "main-instance-page": page_id,
+        "annotation": None,
+    }
+    shape_change = change_mod_obj(page_id, shape_id, ops)
+    info = await get_file_info(file_id)
+    await api.update_file_transit(
+        file_id=file_id,
+        session_id=new_uuid(),
+        revn=info["revn"],
+        vern=info["vern"],
+        changes=[component_change, shape_change],
+        features=info["features"],
+    )
     return {"component_id": component_id, "shape_id": shape_id, "name": name}
 
 
@@ -500,3 +524,159 @@ async def create_page(
     change = change_add_page(page_id, name)
     await apply_changes(file_id, [change])
     return {"id": page_id, "name": name}
+
+
+async def create_component_instance(
+    file_id: str,
+    page_id: str,
+    component_id: str,
+    x: float,
+    y: float,
+    parent_id: str | None = None,
+) -> dict:
+    """Instantiate a component (place it on the canvas).
+
+    Args:
+        file_id: The file UUID.
+        page_id: The page UUID.
+        component_id: The component asset UUID to instantiate.
+        x: X coordinate for the instance.
+        y: Y coordinate for the instance.
+        parent_id: Optional parent frame/group UUID.
+    """
+    from penpot_mcp.services.changes import change_add_obj, get_file_info
+    from penpot_mcp.tools.shapes import _decode_shape_obj
+
+    # 1. Fetch file data
+    file_data = await api.command("get-file", {"id": file_id, "components-v2": True})
+    data = file_data.get("data", {})
+
+    # 2. Get component definition
+    components = data.get("components", {})
+    component = components.get(component_id)
+    if not component:
+        raise ValueError(f"Component {component_id} not found in file library")
+
+    main_instance_id = component.get("main-instance-id")
+    main_instance_page = component.get("main-instance-page")
+
+    # 3. Fetch main instance shape and descendants
+    page = data.get("pages-index", {}).get(main_instance_page, {})
+    raw_objects = page.get("objects", {})
+    
+    # Decode objects
+    objects = {}
+    for obj_id, obj_raw in raw_objects.items():
+        shape = _decode_shape_obj(obj_raw)
+        shape["id"] = obj_id
+        objects[obj_id] = shape
+
+    if main_instance_id not in objects:
+        raise ValueError(f"Main instance shape {main_instance_id} not found on page {main_instance_page}")
+
+    main_shape = objects[main_instance_id]
+
+    # Collect descendants recursively
+    descendants = []
+    def collect_descendants(shape_dict):
+        child_ids = shape_dict.get("shapes") or []
+        for cid in child_ids:
+            if cid in objects:
+                child = objects[cid]
+                descendants.append(child)
+                collect_descendants(child)
+
+    collect_descendants(main_shape)
+
+    # 4. Generate new UUIDs and create ID mapping
+    id_map = {main_instance_id: new_uuid()}
+    for desc in descendants:
+        id_map[desc["id"]] = new_uuid()
+
+    # 5. Position delta calculation
+    old_x = main_shape.get("x", 0)
+    old_y = main_shape.get("y", 0)
+    delta_x = x - old_x
+    delta_y = y - old_y
+
+    changes = []
+    target_frame = parent_id or ROOT_FRAME_ID
+
+    def clone_shape(shape, is_root=False):
+        new_id = id_map[shape["id"]]
+        cloned = shape.copy()
+        cloned["id"] = new_id
+
+        # Update parent-child references
+        if is_root:
+            cloned["parent-id"] = target_frame
+            cloned["frame-id"] = target_frame
+            cloned["component-root"] = True
+            cloned["component-id"] = component_id
+            cloned["component-file"] = file_id
+            cloned["shape-ref"] = main_instance_id
+            if "main-instance" in cloned:
+                del cloned["main-instance"]
+        else:
+            old_parent = shape.get("parent-id")
+            cloned["parent-id"] = id_map.get(old_parent, target_frame)
+            cloned["frame-id"] = target_frame
+            cloned["component-id"] = component_id
+            cloned["component-file"] = file_id
+            cloned["shape-ref"] = shape["id"]
+
+        # Shift coordinates
+        cloned["x"] = shape.get("x", 0) + delta_x
+        cloned["y"] = shape.get("y", 0) + delta_y
+
+        # Selrect shifting
+        selrect = shape.get("selrect")
+        if isinstance(selrect, dict):
+            cloned["selrect"] = {
+                "x": selrect.get("x", 0) + delta_x,
+                "y": selrect.get("y", 0) + delta_y,
+                "width": selrect.get("width", 0),
+                "height": selrect.get("height", 0),
+                "x1": selrect.get("x1", 0) + delta_x,
+                "y1": selrect.get("y1", 0) + delta_y,
+                "x2": selrect.get("x2", 0) + delta_x,
+                "y2": selrect.get("y2", 0) + delta_y,
+            }
+
+        # Points shifting
+        points = shape.get("points")
+        if isinstance(points, list):
+            cloned["points"] = [
+                {"x": pt.get("x", 0) + delta_x, "y": pt.get("y", 0) + delta_y}
+                for pt in points
+            ]
+
+        # Update shapes child list
+        child_ids = shape.get("shapes")
+        if isinstance(child_ids, list):
+            cloned["shapes"] = [id_map[cid] for cid in child_ids if cid in id_map]
+
+        return cloned
+
+    all_clones = []
+    # Root first
+    cloned_root = clone_shape(main_shape, is_root=True)
+    all_clones.append(cloned_root)
+
+    # Descendants
+    for desc in descendants:
+        cloned_desc = clone_shape(desc, is_root=False)
+        all_clones.append(cloned_desc)
+
+    # Create add-obj changes
+    for clone in all_clones:
+        changes.append(change_add_obj(page_id, clone["parent-id"], clone))
+
+    await apply_changes(file_id, changes)
+    return {
+        "instance_id": id_map[main_instance_id],
+        "component_id": component_id,
+        "name": main_shape.get("name", "Instance"),
+        "child_count": len(descendants),
+    }
+

@@ -88,6 +88,7 @@ def _extract_colors(data: dict) -> list[dict]:
                 "color": color.get("color"),
                 "opacity": color.get("opacity"),
                 "gradient": color.get("gradient"),
+                "image": color.get("image"),
                 "path": color.get("path"),
             }
         )
@@ -113,6 +114,7 @@ def _extract_typographies(data: dict) -> list[dict]:
                 "line_height": typo.get("line-height"),
                 "text_transform": typo.get("text-transform"),
                 "path": typo.get("path"),
+                "plugin_data": typo.get("plugin-data"),
             }
         )
     return result

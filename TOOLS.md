@@ -1,6 +1,6 @@
 # Penpot MCP Server — Tool Reference
 
-Complete reference for all **68 tools** provided by the server.
+Complete reference for all **77 tools** provided by the server.
 
 ---
 
@@ -9,14 +9,14 @@ Complete reference for all **68 tools** provided by the server.
 1. [Projects & Teams](#1-projects--teams) (4 tools)
 2. [File Operations](#2-file-operations) (9 tools)
 3. [Shape Reading](#3-shape-reading) (6 tools)
-4. [Components & Design Tokens](#4-components--design-tokens) (4 tools)
+4. [Components & Design Tokens](#4-components--design-tokens) (12 tools)
 5. [Comments & Collaboration](#5-comments--collaboration) (6 tools)
 6. [Media & Fonts](#6-media--fonts) (3 tools)
 7. [Database & Advanced](#7-database--advanced) (3 tools)
 8. [Snapshots](#8-snapshots) (2 tools)
 9. [Export](#9-export) (2 tools)
 10. [Advanced Analysis](#10-advanced-analysis) (2 tools)
-11. [Shape Creation](#11-shape-creation) (8 tools)
+11. [Shape Creation](#11-shape-creation) (9 tools)
 12. [Shape Modification](#12-shape-modification) (12 tools)
 13. [Text Operations](#13-text-operations) (5 tools)
 
@@ -245,12 +245,127 @@ Get all colors defined in a file's library.
 
 ---
 
+### `create_color`
+Create a native color asset (solid or gradient) in a file's local library.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `file_id` | string | Yes | The file UUID. |
+| `name` | string | Yes | Asset name within its path. |
+| `color` | string | No | 3- or 6-digit hexadecimal color. |
+| `opacity` | float | No | Opacity from 0 to 1; defaults to 1. |
+| `path` | string | No | Optional slash-separated asset group. |
+| `gradient` | object | No | Optional gradient dictionary containing type (linear/radial) and stops. |
+
+---
+
+### `update_color`
+Update or rename a native color asset while preserving unspecified fields.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `file_id` | string | Yes | The file UUID. |
+| `color_id` | string | Yes | The color asset UUID. |
+| `name` | string | No | New asset name. |
+| `color` | string | No | New 3- or 6-digit hexadecimal color. |
+| `opacity` | float | No | New opacity from 0 to 1. |
+| `path` | string | No | New asset group; use an empty string for root. |
+| `gradient` | object | No | Optional new gradient dictionary containing type (linear/radial) and stops. |
+
+---
+
+### `delete_color`
+Delete a native color asset from a file's local library.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `file_id` | string | Yes | The file UUID. |
+| `color_id` | string | Yes | The color asset UUID. |
+
+---
+
 ### `get_typography_library`
 Get all typographies defined in a file's library.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `file_id` | string | Yes | The file UUID. |
+
+---
+
+### `create_typography`
+Create a native typography asset in a file's local library. Font metrics use Penpot's native string representation.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `file_id` | string | Yes | The file UUID. |
+| `name` | string | Yes | Asset name within its path. |
+| `font_id` | string | No | Penpot font identifier; defaults to `sourcesanspro`. |
+| `font_family` | string | No | Font family; defaults to `sourcesanspro`. |
+| `font_variant_id` | string | No | Font variant identifier; defaults to `regular`. |
+| `font_size` | string | No | Font size; defaults to `14`. |
+| `font_weight` | string | No | Font weight; defaults to `480`. |
+| `font_style` | string | No | Font style; defaults to `normal`. |
+| `line_height` | string | No | Line height; defaults to `1.2`. |
+| `letter_spacing` | string | No | Letter spacing; defaults to `0`. |
+| `text_transform` | string | No | Text transform; defaults to `none`. |
+| `path` | string | No | Optional slash-separated asset group. |
+
+---
+
+### `update_typography`
+Update or rename a native typography asset while preserving unspecified fields.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `file_id` | string | Yes | The file UUID. |
+| `typography_id` | string | Yes | The typography asset UUID. |
+| `name` | string | No | New asset name. |
+| `font_id` | string | No | New Penpot font identifier. |
+| `font_family` | string | No | New font family. |
+| `font_variant_id` | string | No | New font variant identifier. |
+| `font_size` | string | No | New font size. |
+| `font_weight` | string | No | New font weight. |
+| `font_style` | string | No | New font style. |
+| `line_height` | string | No | New line height. |
+| `letter_spacing` | string | No | New letter spacing. |
+| `text_transform` | string | No | New text transform. |
+| `path` | string | No | New asset group; use an empty string for root. |
+
+---
+
+### `delete_typography`
+Delete a native typography asset from a file's local library.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `file_id` | string | Yes | The file UUID. |
+| `typography_id` | string | Yes | The typography asset UUID. |
+
+---
+
+### `apply_design_token`
+Apply a design token (color asset or typography asset) to a list of shapes.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `file_id` | string | Yes | The file UUID. |
+| `page_id` | string | Yes | The page UUID containing the shapes. |
+| `shape_ids` | array | Yes | List of shape UUIDs to modify. |
+| `token_id` | string | Yes | The UUID of the color or typography library token. |
+| `token_type` | string | Yes | Token type - "color" or "typography". |
+| `target_property` | string | No | Target property - "fill" or "stroke" (applies only to color tokens; defaults to "fill"). |
+
+---
+
+### `auto_bind_library_tokens`
+Automatically search shape styles/colors and bind matching library assets (color or typography tokens).
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `file_id` | string | Yes | The file UUID. |
+| `page_id` | string | Yes | The page UUID to process. |
+| `shape_ids` | array | No | Optional list of shape UUIDs. If omitted, binds all shapes on the page. |
 
 ---
 
@@ -581,6 +696,20 @@ Convert a shape/frame into a reusable component.
 | `page_id` | string | Yes | The page UUID. |
 | `shape_id` | string | Yes | The shape UUID to convert. |
 | `name` | string | No | Component name (keeps current name if omitted). |
+
+---
+
+### `create_component_instance`
+Instantiate a component (place it on the canvas).
+
+| Parameter | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `file_id` | string | Yes | — | The file UUID. |
+| `page_id` | string | Yes | — | The page UUID. |
+| `component_id` | string | Yes | — | The component asset UUID to instantiate. |
+| `x` | float | Yes | — | X coordinate for the instance. |
+| `y` | float | Yes | — | Y coordinate for the instance. |
+| `parent_id` | string | No | — | Optional parent frame/group UUID. |
 
 ---
 
