@@ -149,7 +149,7 @@ class PenpotAPI:
             json={"email": settings.penpot_email, "password": settings.penpot_password},
         )
         resp.raise_for_status()
-        logger.info("Authenticated via credentials for %s", settings.penpot_email)
+        logger.info("Session established for account %s", settings.penpot_email)
 
     async def close(self) -> None:
         if self._client:

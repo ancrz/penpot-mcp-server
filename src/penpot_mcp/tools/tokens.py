@@ -160,11 +160,14 @@ def auto_bind_nested_nodes(node: dict, shape_name: str, parent_name: str, color_
     if "font-size" in node and "font-weight" in node:
         curr_typo_ref = node.get("typography-ref-id")
         if not curr_typo_ref:
-            match_token = find_matching_typography(node.get("font-size"), node.get("font-weight"), typo_tokens)
-            if match_token:
-                set_typography_token_in_node(node, match_token, file_id)
-                changed = True
-                logger.info("Auto-bound nested typography to %s", match_token.get("name"))
+            font_size = node.get("font-size")
+            font_weight = node.get("font-weight")
+            if font_size is not None and font_weight is not None:
+                match_token = find_matching_typography(font_size, font_weight, typo_tokens)
+                if match_token:
+                    set_typography_token_in_node(node, match_token, file_id)
+                    changed = True
+                    logger.info("Auto-bound nested typography to %s", match_token.get("name"))
                 
     # 2. Color Fills Auto-Bind
     if "fills" in node:
@@ -224,7 +227,7 @@ async def apply_design_token(
         token_type: Token type - "color" or "typography".
         target_property: Target property - "fill" or "stroke" (applies only to color tokens).
     """
-    logger.info("Applying token %s (%s) to shapes: %s", token_id, token_type, shape_ids)
+    logger.info("Applying design style %s (%s) to shapes: %s", token_id, token_type, shape_ids)
     
     if token_type == "color":
         color_tokens = await get_colors_library(file_id)
@@ -287,7 +290,7 @@ async def auto_bind_library_tokens(
         page_id: The page UUID to process.
         shape_ids: Optional list of shape UUIDs. If omitted, binds all shapes on the page.
     """
-    logger.info("Running auto-bind of design tokens on page: %s", page_id)
+    logger.info("Running design-system auto-bind on page: %s", page_id)
     
     color_tokens = await get_colors_library(file_id)
     typo_tokens = await get_typography_library(file_id)

@@ -128,7 +128,7 @@ async def test_db_fetch_readonly_uses_readonly_transaction_and_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     database = PenpotDB()
-    executed: list[str] = []
+    executed: list[tuple[str, ...]] = []
     tx_kwargs: dict[str, object] = {}
 
     class DummyConn:
@@ -137,11 +137,11 @@ async def test_db_fetch_readonly_uses_readonly_transaction_and_timeout(
             tx_kwargs.update(kwargs)
             yield
 
-        async def execute(self, sql: str) -> None:
-            executed.append(sql)
+        async def execute(self, sql: str, *args: object) -> None:
+            executed.append((sql, *(str(a) for a in args)))
 
-        async def fetch(self, sql: str, *args):
-            executed.append(sql)
+        async def fetch(self, sql: str, *args: object):
+            executed.append((sql, *(str(a) for a in args)))
             return [{"id": "proj-1", "name": "Demo"}]
 
     @asynccontextmanager
@@ -154,8 +154,11 @@ async def test_db_fetch_readonly_uses_readonly_transaction_and_timeout(
     rows = await database.fetch_readonly("SELECT id, name FROM project")
     assert rows == [{"id": "proj-1", "name": "Demo"}]
     assert tx_kwargs == {"readonly": True}
-    assert executed[0] == "SET LOCAL statement_timeout = 15000"
-    assert executed[1] == "SELECT id, name FROM project"
+    assert executed[0] == (
+        "SELECT set_config('statement_timeout', $1, true)",
+        "15000ms",
+    )
+    assert executed[1] == ("SELECT id, name FROM project",)
 
 
 def test_ws_controller_token_gate(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -255,3 +258,17 @@ async def test_export_object_falls_back_to_credentials_login_for_cookie(
 async def test_mcp_tool_count() -> None:
     tools = await mcp.list_tools()
     assert len(tools) == 77
+
+
+def test_settings_ignores_extra_build_vars_and_exposes_versions() -> None:
+    cfg = Settings(
+        _env_file=None,
+        penpot_mcp_version="0.2.0",
+        mcp_protocol_version="2025-03-26",
+        PYTHON_IMAGE_TAG="3.13-alpine",
+        UV_VERSION="0.12.10",
+    )  # type: ignore[call-arg]
+    assert cfg.penpot_mcp_version == "0.2.0"
+    assert cfg.mcp_protocol_version == "2025-03-26"
+    assert not hasattr(cfg, "PYTHON_IMAGE_TAG")
+    assert not hasattr(cfg, "UV_VERSION")

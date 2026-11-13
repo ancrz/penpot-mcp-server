@@ -46,7 +46,7 @@ class PenpotDB:
         async with self.acquire() as conn:
             async with conn.transaction(readonly=True):
                 timeout_ms = max(1000, int(settings.db_statement_timeout_ms))
-                await conn.execute(f"SET LOCAL statement_timeout = {timeout_ms}")
+                await conn.execute("SELECT set_config('statement_timeout', $1, true)", f"{timeout_ms}ms")  # nosemgrep: python.lang.security.audit.sqli.asyncpg-sqli.asyncpg-sqli
                 rows = await conn.fetch(query, *args)
                 return [dict(r) for r in rows]
 

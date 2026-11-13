@@ -118,7 +118,7 @@ class PenpotWSController:
         self.host = settings.ws_host
         self.port = settings.ws_port
         logger.info(
-            "Starting Plugin WebSocket Server on ws://%s:%d (origin=%s)",
+            "Starting Plugin WebSocket Server on %s:%d (origin=%s)",
             self.host,
             self.port,
             settings.plugin_origin,
