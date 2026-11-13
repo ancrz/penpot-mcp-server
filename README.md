@@ -27,6 +27,19 @@ Think of it as the bridge between your AI assistant and your design tool.
 
 ---
 
+## Milestones & Status (v0.2.0)
+
+```mermaid
+flowchart LR
+    I["Intent: v0.2.0 Security Hardening"] --> M1["M1: planned (Orchestrator) ✅"]
+    M1 --> M2["M2: implemented (Pragma) ✅"]
+    M2 --> M3["M3: verified (Dokimos) ✅"]
+    M3 --> M4["M4: documented (Graphos) ✅"]
+    M4 --> M5["M5: committed (Hermon)"]
+```
+
+---
+
 ## Architecture
 
 ```mermaid
@@ -164,7 +177,7 @@ docker compose up -d --build penpot-mcp
 ```bash
 # Quick health check
 curl -s http://localhost:8787/
-# → {"service": "Penpot MCP", "status": "ok", "version": "0.1.0"}
+# → {"service": "Penpot MCP", "status": "ok", "version": "0.2.0"}
 ```
 
 ```bash
@@ -379,6 +392,10 @@ All settings are via environment variables. See [`.env.example`](.env.example) f
 
 | Variable | Default | Description |
 |---|---|---|
+| `PENPOT_MCP_VERSION` | `0.2.0` | Penpot MCP server release version |
+| `PYTHON_IMAGE_TAG` | `3.13-alpine` | Base container image tag for Python runtime (`3.13-alpine` or `3.13-slim`) |
+| `UV_VERSION` | `0.12.10` | Astral uv version used in container builder stage |
+| `MCP_PROTOCOL_VERSION` | `2025-03-26` | Model Context Protocol version header |
 | `PENPOT_BASE_URL` | `http://penpot-frontend:8080` | Internal Penpot URL (Docker network) |
 | `PENPOT_PUBLIC_URL` | `http://localhost:9001` | Public URL where you access Penpot in browser |
 | `PENPOT_ACCESS_TOKEN` | — | API access token (preferred auth method) |
