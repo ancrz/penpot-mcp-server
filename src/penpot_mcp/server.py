@@ -472,6 +472,72 @@ async def get_colors_library(file_id: str) -> str:
 
 
 @mcp.tool()
+async def create_color(
+    file_id: str,
+    name: str,
+    color: str | None = None,
+    opacity: float = 1.0,
+    path: str = "",
+    gradient: dict | None = None,
+) -> str:
+    """Create a native color asset (solid color or gradient) in a file's local library.
+
+    Args:
+        file_id: The file UUID.
+        name: Asset name within its path, such as "Primary".
+        color: Optional 3- or 6-digit hexadecimal color, such as "#DFFB73".
+        opacity: Color opacity from 0 to 1 (default 1).
+        path: Optional slash-separated asset group, such as "Accent".
+        gradient: Optional gradient dictionary containing type (linear/radial) and stops.
+    """
+    from penpot_mcp.tools.colors import create_color as _create_color
+
+    result = await _create_color(file_id, name, color, opacity, path, gradient)
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+async def update_color(
+    file_id: str,
+    color_id: str,
+    name: str | None = None,
+    color: str | None = None,
+    opacity: float | None = None,
+    path: str | None = None,
+    gradient: dict | None = None,
+) -> str:
+    """Update or rename a native color asset, preserving unspecified fields.
+
+    Args:
+        file_id: The file UUID.
+        color_id: The color asset UUID.
+        name: Optional new asset name.
+        color: Optional new 3- or 6-digit hexadecimal color.
+        opacity: Optional opacity from 0 to 1.
+        path: Optional slash-separated asset group; pass an empty string for root.
+        gradient: Optional gradient dictionary containing type (linear/radial) and stops.
+    """
+    from penpot_mcp.tools.colors import update_color as _update_color
+
+    result = await _update_color(file_id, color_id, name, color, opacity, path, gradient)
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+async def delete_color(file_id: str, color_id: str) -> str:
+    """Delete a native color asset from a file's local library.
+
+    Args:
+        file_id: The file UUID.
+        color_id: The color asset UUID.
+    """
+    from penpot_mcp.tools.colors import delete_color as _delete_color
+
+    result = await _delete_color(file_id, color_id)
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
 async def get_typography_library(file_id: str) -> str:
     """Get all typographies defined in a file's library.
 
@@ -481,6 +547,90 @@ async def get_typography_library(file_id: str) -> str:
     from penpot_mcp.tools.components import get_typography_library as _get_typography
 
     result = await _get_typography(file_id)
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+async def create_typography(
+    file_id: str,
+    name: str,
+    font_id: str = "sourcesanspro",
+    font_family: str = "sourcesanspro",
+    font_variant_id: str = "regular",
+    font_size: str = "14",
+    font_weight: str = "480",
+    font_style: str = "normal",
+    line_height: str = "1.2",
+    letter_spacing: str = "0",
+    text_transform: str = "none",
+    path: str = "",
+) -> str:
+    """Create a native typography asset in a file's local library.
+
+    Font metrics are strings because that is Penpot's native typography schema.
+    """
+    from penpot_mcp.tools.typographies import create_typography as _create_typography
+
+    result = await _create_typography(
+        file_id,
+        name,
+        font_id,
+        font_family,
+        font_variant_id,
+        font_size,
+        font_weight,
+        font_style,
+        line_height,
+        letter_spacing,
+        text_transform,
+        path,
+    )
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+async def update_typography(
+    file_id: str,
+    typography_id: str,
+    name: str | None = None,
+    font_id: str | None = None,
+    font_family: str | None = None,
+    font_variant_id: str | None = None,
+    font_size: str | None = None,
+    font_weight: str | None = None,
+    font_style: str | None = None,
+    line_height: str | None = None,
+    letter_spacing: str | None = None,
+    text_transform: str | None = None,
+    path: str | None = None,
+) -> str:
+    """Update a native typography asset, preserving unspecified fields."""
+    from penpot_mcp.tools.typographies import update_typography as _update_typography
+
+    result = await _update_typography(
+        file_id,
+        typography_id,
+        name,
+        font_id,
+        font_family,
+        font_variant_id,
+        font_size,
+        font_weight,
+        font_style,
+        line_height,
+        letter_spacing,
+        text_transform,
+        path,
+    )
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+async def delete_typography(file_id: str, typography_id: str) -> str:
+    """Delete a native typography asset from a file's local library."""
+    from penpot_mcp.tools.typographies import delete_typography as _delete_typography
+
+    result = await _delete_typography(file_id, typography_id)
     return json.dumps(result, indent=2)
 
 
@@ -1117,6 +1267,32 @@ async def create_component(
 
 
 @mcp.tool()
+async def create_component_instance(
+    file_id: str,
+    page_id: str,
+    component_id: str,
+    x: float,
+    y: float,
+    parent_id: str | None = None,
+) -> str:
+    """Instantiate a component (place it on the canvas).
+
+    Args:
+        file_id: The file UUID.
+        page_id: The page UUID.
+        component_id: The component asset UUID to instantiate.
+        x: X coordinate for the instance.
+        y: Y coordinate for the instance.
+        parent_id: Optional parent frame/group UUID.
+    """
+    from penpot_mcp.tools.create import create_component_instance as _create
+
+    result = await _create(file_id, page_id, component_id, x, y, parent_id)
+    return json.dumps(result, indent=2, default=str)
+
+
+
+@mcp.tool()
 async def create_page(file_id: str, name: str = "New Page") -> str:
     """Add a new page to a file.
 
@@ -1556,6 +1732,57 @@ async def set_text_style(
         font_style,
         text_decoration,
     )
+    return json.dumps(result, indent=2, default=str)
+
+
+@mcp.tool()
+async def apply_design_token(
+    file_id: str,
+    page_id: str,
+    shape_ids: list[str],
+    token_id: str,
+    token_type: str,
+    target_property: str = "fill",
+) -> str:
+    """Apply a design token (color asset or typography asset) to a list of shapes.
+
+    Args:
+        file_id: The file UUID.
+        page_id: The page UUID containing the shapes.
+        shape_ids: List of shape UUIDs to modify.
+        token_id: The UUID of the color or typography library token.
+        token_type: Token type - "color" or "typography".
+        target_property: Target property - "fill" or "stroke" (applies only to color tokens).
+    """
+    from penpot_mcp.tools.tokens import apply_design_token as _apply
+
+    result = await _apply(
+        file_id,
+        page_id,
+        shape_ids,
+        token_id,
+        token_type,
+        target_property,
+    )
+    return json.dumps(result, indent=2, default=str)
+
+
+@mcp.tool()
+async def auto_bind_library_tokens(
+    file_id: str,
+    page_id: str,
+    shape_ids: list[str] | None = None,
+) -> str:
+    """Automatically search shape styles/colors and bind matching library assets (color or typography tokens).
+
+    Args:
+        file_id: The file UUID.
+        page_id: The page UUID.
+        shape_ids: Optional list of shape UUIDs. If omitted, binds all shapes on the page.
+    """
+    from penpot_mcp.tools.tokens import auto_bind_library_tokens as _bind
+
+    result = await _bind(file_id, page_id, shape_ids)
     return json.dumps(result, indent=2, default=str)
 
 

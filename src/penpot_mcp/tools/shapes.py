@@ -29,6 +29,11 @@ def _serialize_shape(shape: dict) -> dict:
         "blend_mode": shape.get("blend-mode"),
         "constraints_h": shape.get("constraints-h"),
         "constraints_v": shape.get("constraints-v"),
+        "component_id": shape.get("component-id"),
+        "component_file": shape.get("component-file"),
+        "component_root": shape.get("component-root"),
+        "shape_ref": shape.get("shape-ref"),
+        "group_type": shape.get("group-type"),
     }
 
 
@@ -58,9 +63,18 @@ def _decode_shape_obj(obj: Any) -> dict:
             return decoded
         if isinstance(decoded, list) and len(decoded) == 2:
             return decoded[1] if isinstance(decoded[1], dict) else {}
+        if isinstance(decoded, list) and len(decoded) > 0 and decoded[0] == "^ ":
+            from penpot_mcp.services.transit import _decode, _Cache
+            res = _decode(decoded, _Cache())
+            return res if isinstance(res, dict) else {}
         return {}
     if isinstance(obj, dict):
         return obj
+    # Handle list that is raw transit map
+    if isinstance(obj, list) and len(obj) > 0 and obj[0] == "^ ":
+        from penpot_mcp.services.transit import _decode, _Cache
+        res = _decode(obj, _Cache())
+        return res if isinstance(res, dict) else {}
     # Handle already-decoded tagged value: [tag, {data}]
     if isinstance(obj, list) and len(obj) == 2 and isinstance(obj[1], dict):
         return obj[1]
