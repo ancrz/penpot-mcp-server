@@ -7,7 +7,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python 3.13+](https://img.shields.io/badge/Python-3.13+-yellow.svg)](https://python.org)
 [![MCP Protocol](https://img.shields.io/badge/MCP-2025--03--26-green.svg)](https://modelcontextprotocol.io)
-[![Tools: 68](https://img.shields.io/badge/Tools-68-orange.svg)](TOOLS.md)
+[![Tools: 77](https://img.shields.io/badge/Tools-77-orange.svg)](TOOLS.md)
 
 ---
 
@@ -22,7 +22,7 @@ Piensa en ello como el puente entre tu asistente de IA y tu herramienta de dise�
 | Problema | Solución |
 |---|---|
 | **Trabajo de diseño manual** | La IA crea componentes de UI, diseños y prototipos directamente en Penpot |
-| **Sin API programática para Penpot** | 68 herramientas que cubren proyectos, formas, texto, exportaciones, comentarios y más |
+| **Sin API programática para Penpot** | 77 herramientas que cubren proyectos, formas, texto, exportaciones, comentarios y más |
 | **Brecha entre diseño y código** | Genera CSS a partir de cualquier forma, exporta a SVG/PNG, extrae tokens de diseño |
 | **Tareas repetitivas** | Operaciones por lotes: renombrar formas, actualizar colores, crear variantes |
 | **Mantenimiento del sistema de diseño** | Leer/escribir componentes, colores y tipografías de forma programática |
@@ -36,7 +36,7 @@ graph TB
     AI["Agente IA\n(Claude Code · Cursor · Gemini CLI)"]
 
     subgraph SERVERS["Capa MCP"]
-        MCP["penpot-mcp — Python\n68 herramientas · :8787\nLecturas DB + Escrituras API + Plugin"]
+        MCP["penpot-mcp — Python\n77 herramientas · :8787\nLecturas DB + Escrituras API + Plugin"]
         OMCP["Penpot MCP — Oficial\n~20 herramientas · monorepo penpot/penpot\nSolo API de Plugin · TypeScript"]
     end
 
@@ -223,7 +223,7 @@ Claude Code usa `"type": "http"` para conexiones HTTP streamable.
 }
 ```
 
-Reinicia Claude Code. Deberías ver **68 herramientas** del servidor `penpot` listadas cuando ejecutes `/mcp`.
+Reinicia Claude Code. Deberías ver **77 herramientas** del servidor `penpot` listadas cuando ejecutes `/mcp`.
 
 > **Nota:** Usa `"type": "http"`, no `"streamable-http"`. Claude Code mapea `http` al transporte HTTP streamable internamente. Usar `streamable-http` causará un error de validación de esquema.
 
@@ -301,7 +301,7 @@ El Plugin MCP de Penpot conecta al agente de IA con el **lienzo en vivo de Penpo
 - **Selección en vivo**: La IA puede consultar qué formas tienes seleccionadas actualmente
 - **Ejecución de scripts**: La IA puede ejecutar JavaScript directamente a través de la API del Plugin de Penpot
 
-> Estas funciones requieren que el plugin del navegador esté conectado. Las 66 herramientas headless funcionan sin él.
+> Estas funciones requieren que el plugin del navegador esté conectado. Las 75 herramientas headless funcionan sin él.
 
 ### Cargar el Plugin
 
@@ -355,20 +355,20 @@ Si no aparece ninguna ventana y el plugin permanece desconectado, verifica `chro
 
 ## Resumen de Herramientas
 
-El servidor proporciona **68 herramientas** en 11 categorías. Consulta [**TOOLS.md**](TOOLS.md) para la referencia completa con todos los parámetros.
+El servidor proporciona **77 herramientas** en 13 categorías. Consulta [**TOOLS.md**](TOOLS.md) para la referencia completa con todos los parámetros.
 
 | Categoría | Cantidad | Ejemplos |
 |---|---|---|
 | Proyectos y Equipos | 4 | `list_projects`, `list_teams`, `list_files`, `search_files` |
 | Operaciones de Archivos | 9 | `create_file`, `get_file_pages`, `rename_file`, `duplicate_file` |
 | Lectura de Formas | 6 | `get_shape_tree`, `get_shape_details`, `get_shape_css`, `search_shapes` |
-| Componentes y Tokens | 4 | `get_design_tokens`, `get_colors_library`, `get_typography_library` |
+| Componentes y Tokens | 12 | `create_color`, `update_color`, `apply_design_token`, `auto_bind_library_tokens` |
 | Comentarios | 6 | `create_comment`, `reply_to_comment`, `resolve_comment` |
 | Medios y Fuentes | 3 | `upload_media`, `list_media_assets`, `list_fonts` |
 | Base de Datos y Avanzado | 3 | `query_database`, `get_webhooks`, `get_profile` |
 | Instantáneas | 2 | `create_snapshot`, `get_snapshots` |
 | Exportar | 2 | `export_frame_png`, `export_frame_svg` |
-| Creación de Formas | 8 | `create_rectangle`, `create_frame`, `create_text`, `create_path` |
+| Creación de Formas | 9 | `create_rectangle`, `create_frame`, `create_text`, `create_path`, `create_component_instance` |
 | Modificación de Formas | 12 | `set_fill`, `set_stroke`, `set_layout`, `move_shape`, `resize_shape` |
 | Operaciones de Texto | 5 | `set_text_content`, `set_font`, `set_font_size`, `set_text_align` |
 | Análisis Avanzado | 2 | `get_file_raw_data`, `compare_revisions` |
@@ -389,14 +389,19 @@ Todos los ajustes se realizan a través de variables de entorno. Consulta [`.env
 | `PENPOT_DB_HOST` | `penpot-postgres` | Host de PostgreSQL |
 | `PENPOT_DB_PORT` | `5432` | Puerto de PostgreSQL |
 | `PENPOT_DB_NAME` | `penpot` | Nombre de la base de datos |
-| `PENPOT_DB_USER` | `penpot` | Usuario de la base de datos |
+| `PENPOT_DB_USER` | `penpot_mcp` | Usuario de la base de datos (rol dedicado de solo lectura recomendado) |
 | `PENPOT_DB_PASS` | — | Contraseña de la base de datos |
+| `DB_STATEMENT_TIMEOUT_MS` | `30000` | Tiempo máximo de ejecución SQL en milisegundos |
 | `MCP_HOST` | `0.0.0.0` | Dirección de vinculación del servidor MCP |
 | `MCP_PORT` | `8787` | Puerto del servidor MCP |
 | `MCP_LOG_LEVEL` | `info` | Nivel de registro (debug/info/warning/error) |
-| `WS_HOST` | `0.0.0.0` | Dirección de vinculación del servidor WebSocket |
+| `MCP_ALLOWED_HOSTS` | `["127.0.0.1","localhost","penpot-mcp"]` | Hosts permitidos para protección contra DNS rebinding |
+| `WS_ENABLED` | `false` | Activación explícita del puente WebSocket para el plugin del navegador |
+| `WS_HOST` | `127.0.0.1` | Dirección de vinculación del servidor WebSocket |
 | `WS_PORT` | `4402` | Puerto WebSocket para el plugin del navegador |
+| `WS_TOKEN` | — | Token secreto compartido requerido para el handshake WebSocket |
 | `PLUGIN_WS_URL` | `ws://localhost:4402` | URL WebSocket que usa el plugin del navegador para conectarse |
+| `PLUGIN_ORIGIN` | `http://localhost:8787` | Origen permitido del navegador para el handshake WebSocket |
 
 ---
 
@@ -470,7 +475,7 @@ uv run pytest tests/ -v
 ```
 penpot-mcp-server/
 ├── src/penpot_mcp/
-│   ├── server.py            # Punto de entrada FastMCP, 68 registros de herramientas, rutas del plugin
+│   ├── server.py            # Punto de entrada FastMCP, 77 registros de herramientas, rutas del plugin
 │   ├── config.py            # Configuración de Pydantic Settings
 │   ├── gateway.py           # Gateway de contexto híbrido (conciencia de DB + Plugin)
 │   ├── ws_controller.py     # Servidor WebSocket para el puente del plugin del navegador (:4402)

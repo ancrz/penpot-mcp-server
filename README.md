@@ -5,7 +5,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python 3.13+](https://img.shields.io/badge/Python-3.13+-yellow.svg)](https://python.org)
 [![MCP Protocol](https://img.shields.io/badge/MCP-2025--03--26-green.svg)](https://modelcontextprotocol.io)
-[![Tools: 74](https://img.shields.io/badge/Tools-74-orange.svg)](TOOLS.md)
+[![Tools: 77](https://img.shields.io/badge/Tools-77-orange.svg)](TOOLS.md)
 
 ---
 
@@ -20,7 +20,7 @@ Think of it as the bridge between your AI assistant and your design tool.
 | Problem | Solution |
 |---|---|
 | **Manual design work** | AI creates UI components, layouts, and prototypes directly in Penpot |
-| **No programmatic API for Penpot** | 74 tools covering projects, shapes, text, exports, comments, and more |
+| **No programmatic API for Penpot** | 77 tools covering projects, shapes, text, exports, comments, and more |
 | **Design-to-code gap** | Generate CSS from any shape, export to SVG/PNG, extract design tokens |
 | **Repetitive tasks** | Batch operations — rename shapes, update colors, create variants |
 | **Design system maintenance** | Read/write components, colors, typographies programmatically |
@@ -34,7 +34,7 @@ graph TB
     AI["AI Agent\n(Claude Code · Cursor · Gemini CLI)"]
 
     subgraph SERVERS["MCP Layer"]
-        MCP["penpot-mcp — Python\n74 tools · :8787\nDB reads + API writes + Plugin"]
+        MCP["penpot-mcp — Python\n77 tools · :8787\nDB reads + API writes + Plugin"]
         OMCP["Penpot MCP — Official\n~20 tools · penpot/penpot monorepo\nPlugin API only · TypeScript"]
     end
 
@@ -221,7 +221,7 @@ Claude Code uses `"type": "http"` for streamable HTTP connections.
 }
 ```
 
-Restart Claude Code. You should see **74 tools** from the `penpot` server listed when you run `/mcp`.
+Restart Claude Code. You should see **77 tools** from the `penpot` server listed when you run `/mcp`.
 
 > **Note:** Use `"type": "http"`, not `"streamable-http"`. Claude Code maps `http` to the streamable HTTP transport internally. Using `streamable-http` will cause a schema validation error.
 
@@ -299,7 +299,7 @@ The Penpot MCP Plugin bridges the AI agent with the **live Penpot canvas**, enab
 - **Live selection**: AI can query which shapes you currently have selected
 - **Script execution**: AI can run JavaScript directly via the Penpot Plugin API
 
-> These features require the browser plugin to be connected. The 72 headless tools work without it.
+> These features require the browser plugin to be connected. The 75 headless tools work without it.
 
 ### Loading the Plugin
 
@@ -387,14 +387,19 @@ All settings are via environment variables. See [`.env.example`](.env.example) f
 | `PENPOT_DB_HOST` | `penpot-postgres` | PostgreSQL host |
 | `PENPOT_DB_PORT` | `5432` | PostgreSQL port |
 | `PENPOT_DB_NAME` | `penpot` | Database name |
-| `PENPOT_DB_USER` | `penpot` | Database user |
+| `PENPOT_DB_USER` | `penpot_mcp` | Database user (dedicated read-only role recommended) |
 | `PENPOT_DB_PASS` | — | Database password |
-| `MCP_HOST` | `0.0.0.0` | MCP server bind address |
+| `DB_STATEMENT_TIMEOUT_MS` | `30000` | Read-only SQL statement timeout in milliseconds |
+| `MCP_HOST` | `0.0.0.0` | MCP server bind address (publish on `127.0.0.1` only unless behind an authenticating reverse proxy) |
 | `MCP_PORT` | `8787` | MCP server port |
 | `MCP_LOG_LEVEL` | `info` | Log level (debug/info/warning/error) |
-| `WS_HOST` | `0.0.0.0` | WebSocket server bind address |
+| `MCP_ALLOWED_HOSTS` | `["127.0.0.1","localhost","penpot-mcp"]` | Allowed `Host` headers for DNS-rebinding protection |
+| `WS_ENABLED` | `false` | Opt-in toggle for the live browser plugin WebSocket bridge |
+| `WS_HOST` | `127.0.0.1` | WebSocket server bind address |
 | `WS_PORT` | `4402` | WebSocket port for browser plugin |
+| `WS_TOKEN` | — | Shared secret token required to authenticate WebSocket plugin connections |
 | `PLUGIN_WS_URL` | `ws://localhost:4402` | WebSocket URL the browser plugin uses to connect |
+| `PLUGIN_ORIGIN` | `http://localhost:8787` | Allowed browser `Origin` for the WebSocket handshake |
 
 ---
 
@@ -468,7 +473,7 @@ uv run pytest tests/ -v
 ```
 penpot-mcp-server/
 ├── src/penpot_mcp/
-│   ├── server.py            # FastMCP entry point, 74 tool registrations, plugin routes
+│   ├── server.py            # FastMCP entry point, 77 tool registrations, plugin routes
 │   ├── config.py            # Pydantic Settings configuration
 │   ├── gateway.py           # Hybrid context gateway (DB + Plugin awareness)
 │   ├── ws_controller.py     # WebSocket server for browser plugin bridge (:4402)

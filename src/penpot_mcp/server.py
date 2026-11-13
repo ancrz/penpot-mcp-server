@@ -6,8 +6,11 @@ import json
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import quote
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import FileResponse, JSONResponse
 
 from penpot_mcp.config import settings
@@ -26,6 +29,12 @@ mcp = FastMCP(
     ),
     host=settings.mcp_host,
     port=settings.mcp_port,
+    transport_security=TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=[f"{h}:*" for h in settings.mcp_allowed_hosts]
+        + list(settings.mcp_allowed_hosts),
+        allowed_origins=[f"http://{h}:*" for h in settings.mcp_allowed_hosts],
+    ),
 )
 
 
@@ -105,22 +114,14 @@ async def plugin_ui(request):
     )
 
 
-@mcp.custom_route("/plugin/config.json", methods=["GET", "OPTIONS"])
+@mcp.custom_route("/plugin/config.json", methods=["GET"])
 async def plugin_config(request):
-    """Serve dynamic plugin configuration (WebSocket URL)."""
-    if request.method == "OPTIONS":
-        from starlette.responses import Response
-        return Response(
-            status_code=204,
-            headers={
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Methods": "GET, OPTIONS",
-            },
-        )
-    return JSONResponse(
-        {"ws_url": settings.plugin_ws_url, "version": "1.0.0"},
-        headers={"Access-Control-Allow-Origin": "*"},
-    )
+    """Serve dynamic plugin configuration (WebSocket URL, same-origin only)."""
+    ws_url = settings.plugin_ws_url
+    if settings.ws_token:
+        sep = "&" if "?" in ws_url else "?"
+        ws_url = f"{ws_url}{sep}token={quote(settings.ws_token, safe='')}"
+    return JSONResponse({"ws_url": ws_url, "version": "1.0.0"})
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1803,6 +1804,10 @@ def main():
 
     async def run():
         starlette_app = mcp.streamable_http_app()
+        starlette_app.add_middleware(
+            TrustedHostMiddleware,
+            allowed_hosts=settings.mcp_allowed_hosts,
+        )
         _orig_lifespan = starlette_app.router.lifespan_context
 
         @asynccontextmanager

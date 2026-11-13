@@ -1,5 +1,7 @@
 """Configuration for Penpot MCP server."""
 
+from __future__ import annotations
+
 from pydantic_settings import BaseSettings
 
 
@@ -11,26 +13,31 @@ class Settings(BaseSettings):
     # Auth - access token (preferred)
     penpot_access_token: str = ""
 
-    # Auth - credentials (fallback)
+    # Auth - credentials (fallback, also used by /api/export cookie auth)
     penpot_email: str = ""
     penpot_password: str = ""
 
-    # PostgreSQL direct access
+    # PostgreSQL direct access (use dedicated read-only penpot_mcp role in production)
     penpot_db_host: str = "penpot-postgres"
     penpot_db_port: int = 5432
     penpot_db_name: str = "penpot"
-    penpot_db_user: str = "penpot"
+    penpot_db_user: str = "penpot_mcp"
     penpot_db_pass: str = ""
+    db_statement_timeout_ms: int = 30000
 
-    # MCP Server
+    # MCP Server & DNS-rebinding / Host header protection
     mcp_host: str = "0.0.0.0"
     mcp_port: int = 8787
     mcp_log_level: str = "info"
+    mcp_allowed_hosts: list[str] = ["127.0.0.1", "localhost", "penpot-mcp"]
 
-    # WebSocket / Plugin channel
-    ws_host: str = "0.0.0.0"
+    # WebSocket / Plugin channel (opt-in, localhost-bound, token + origin gated)
+    ws_enabled: bool = False
+    ws_host: str = "127.0.0.1"
     ws_port: int = 4402
+    ws_token: str = ""
     plugin_ws_url: str = "ws://localhost:4402"
+    plugin_origin: str = "http://localhost:8787"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

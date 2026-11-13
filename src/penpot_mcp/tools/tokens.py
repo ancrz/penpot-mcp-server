@@ -6,7 +6,6 @@ import logging
 from penpot_mcp.tools.components import get_colors_library, get_typography_library
 from penpot_mcp.tools.shapes import get_page_objects, get_shape_details
 from penpot_mcp.tools.modify import modify_shape
-from penpot_mcp.tools.files import get_file_pages
 
 logger = logging.getLogger(__name__)
 

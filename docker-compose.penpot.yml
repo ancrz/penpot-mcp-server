@@ -6,11 +6,18 @@
 # Copy this service definition into your existing Penpot
 # docker-compose.yml, inside the `services:` section.
 #
-# Prerequisites:
-#   - Your Penpot stack uses a network named "penpot"
-#   - penpot-postgres has a healthcheck configured
-#   - You have cloned this repo next to your Penpot compose file
-#     (or adjust the build context path)
+# Security Prerequisite (Least-Privilege PostgreSQL Role):
+#   Create a dedicated read-only `penpot_mcp` role in `penpot-postgres`:
+#     CREATE ROLE penpot_mcp LOGIN PASSWORD 'change-me' NOSUPERUSER NOCREATEDB NOCREATEROLE;
+#     ALTER ROLE penpot_mcp SET default_transaction_read_only = on;
+#     ALTER ROLE penpot_mcp SET statement_timeout = '30s';
+#     GRANT USAGE ON SCHEMA public TO penpot_mcp;
+#     GRANT SELECT ON comment, comment_thread, file, file_change, file_library_rel,
+#         file_media_object, presence, project, share_link, team, team_font_variant,
+#         team_profile_rel TO penpot_mcp;
+#     GRANT SELECT (id, fullname, email) ON profile TO penpot_mcp;
+#     GRANT SELECT (id, team_id, created_at, updated_at, uri, mtype, error_code,
+#         error_count, is_active) ON webhook TO penpot_mcp;
 #
 # After adding, run:
 #   docker compose up -d --build penpot-mcp
@@ -42,11 +49,16 @@ services:
       PENPOT_DB_HOST: "penpot-postgres"
       PENPOT_DB_PORT: "5432"
       PENPOT_DB_NAME: "penpot"
-      PENPOT_DB_USER: "penpot"
-      PENPOT_DB_PASS: "${POSTGRES_PASSWORD:-penpot}"
+      PENPOT_DB_USER: "${PENPOT_DB_USER:-penpot_mcp}"
+      PENPOT_DB_PASS: "${PENPOT_DB_PASS:-}"
+      DB_STATEMENT_TIMEOUT_MS: "30000"
       MCP_HOST: "0.0.0.0"
       MCP_PORT: "8787"
       MCP_LOG_LEVEL: "info"
-      WS_HOST: "0.0.0.0"
+      MCP_ALLOWED_HOSTS: '["127.0.0.1","localhost","penpot-mcp"]'
+      WS_ENABLED: "${WS_ENABLED:-false}"
+      WS_HOST: "${WS_HOST:-127.0.0.1}"
       WS_PORT: "4402"
+      WS_TOKEN: "${WS_TOKEN:-}"
       PLUGIN_WS_URL: "ws://localhost:4402"
+      PLUGIN_ORIGIN: "http://localhost:8787"

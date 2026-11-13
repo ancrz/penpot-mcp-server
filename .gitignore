@@ -1,31 +1,35 @@
-# Environment (contains credentials)
+# Environment (contains credentials — keep local only, recreate from .env.example or .env.local.example)
 .env
+.env.*
+*.env
+!.env.example
+!.env.*.example
 
 # Python
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
+*$py.class
 *.egg-info/
+.venv/
 dist/
 build/
-.venv/
 
-# uv
-uv.lock
-
-# Testing
+# Testing & QA caches
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
-# IDE
+# IDE & local editor state
 .vscode/
 .idea/
 *.swp
 *.swo
-*~
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Documentation
+# Local documentation notes
 docs/*.md

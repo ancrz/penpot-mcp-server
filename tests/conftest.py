@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 import pytest_asyncio
 
 from penpot_mcp.services.api import api
@@ -9,8 +10,12 @@ from penpot_mcp.services.db import db
 
 
 @pytest_asyncio.fixture(scope="session", autouse=True, loop_scope="session")
-async def setup_services():
-    """Connect to Penpot DB and API once for the entire test session."""
+async def setup_services(request: pytest.FixtureRequest):
+    """Connect to Penpot DB and API once when integration tests are selected."""
+    if not any(item.get_closest_marker("integration") for item in request.session.items):
+        yield
+        return
+
     try:
         await db.connect()
     except Exception as e:
@@ -28,4 +33,3 @@ async def setup_services():
         await db.close()
     except Exception:
         pass
-

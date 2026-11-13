@@ -48,7 +48,23 @@ def _escape_transit_string(value: str) -> str:
     return value
 
 
-_KEYWORDS_TYPES = {"add-obj", "mod-obj", "del-obj", "add-page", "del-page", "mod-page", "mov-objects", "set"}
+_KEYWORDS_TYPES = {
+    "add-obj",
+    "mod-obj",
+    "del-obj",
+    "add-page",
+    "del-page",
+    "mod-page",
+    "mov-objects",
+    "set",
+    "add-color",
+    "mod-color",
+    "del-color",
+    "add-typography",
+    "mod-typography",
+    "del-typography",
+    "add-component",
+}
 
 _ENUM_VALUE_KEYS = {
     "stroke-style",
@@ -116,6 +132,11 @@ class PenpotAPI:
                 f"Token {settings.penpot_access_token}"
             )
             logger.info("Authenticated via access token")
+            # Also login to obtain auth-token cookie for the exporter service,
+            # which only accepts cookie auth, not Authorization headers.
+            if settings.has_credentials:
+                await self._login()
+                logger.info("Also obtained session cookie for exporter auth")
         elif settings.has_credentials:
             await self._login()
         else:
@@ -356,8 +377,23 @@ class PenpotAPI:
                 auth_token = cookie.value
                 break
 
+        if not auth_token and settings.has_credentials:
+            logger.info("No auth-token cookie found; logging in for exporter auth")
+            await self._login()
+            for cookie in self._client.cookies.jar:
+                if cookie.name == "auth-token":
+                    auth_token = cookie.value
+                    break
+
+        if not auth_token:
+            raise RuntimeError(
+                "No auth-token cookie available for the exporter. "
+                "Configure PENPOT_EMAIL and PENPOT_PASSWORD alongside "
+                "PENPOT_ACCESS_TOKEN to enable exports."
+            )
+
         headers = {"Content-Type": "application/transit+json"}
-        cookies = {"auth-token": auth_token} if auth_token else {}
+        cookies = {"auth-token": auth_token}
 
         resp = await self._client.post(
             "/api/export",

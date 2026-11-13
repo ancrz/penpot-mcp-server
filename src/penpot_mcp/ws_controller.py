@@ -1,10 +1,15 @@
 """WebSocket Controller for Penpot MCP Interactive Channel."""
 
+from __future__ import annotations
+
 import asyncio
+from http import HTTPStatus
 import json
 import logging
-import uuid
+import secrets
 from typing import Any, Dict, Optional
+from urllib.parse import parse_qs, urlsplit
+import uuid
 
 import websockets
 
@@ -16,11 +21,12 @@ logger = logging.getLogger(__name__)
 class PenpotWSController:
     """Manages the WebSocket connection with the Penpot Plugin."""
 
-    def __init__(self, host: str = "0.0.0.0", port: int = 4402):
+    def __init__(self, host: str = "127.0.0.1", port: int = 4402):
         self.host = host
         self.port = port
         self.active_connections: set[Any] = set()
         self._server_task: Optional[asyncio.Task] = None
+        self._server: Any = None
 
         # Phase 3 feature: Live Selection Context
         self.active_selection: list[str] = []
@@ -30,9 +36,22 @@ class PenpotWSController:
         """Check if there is at least one active plugin connected."""
         return len(self.active_connections) > 0
 
-    async def _handler(self, websocket):
+    def _check_token(self, connection: Any, request: Any) -> Any:
+        """Validate the shared WebSocket token during the HTTP upgrade handshake."""
+        expected_token = settings.ws_token
+        if not expected_token:
+            return connection.respond(HTTPStatus.FORBIDDEN, "Forbidden\n")
+
+        path = getattr(request, "path", "") or ""
+        token = parse_qs(urlsplit(path).query).get("token", [""])[0]
+        if not token or not secrets.compare_digest(token, expected_token):
+            logger.warning("Rejected WebSocket connection with invalid or missing token")
+            return connection.respond(HTTPStatus.FORBIDDEN, "Forbidden\n")
+        return None
+
+    async def _handler(self, websocket: Any) -> None:
         """Handle incoming WebSocket connections from the Penpot Plugin."""
-        logger.info(f"New Plugin connection from {websocket.remote_address}")
+        logger.info("New Plugin connection from %s", websocket.remote_address)
         self.active_connections.add(websocket)
 
         try:
@@ -45,22 +64,22 @@ class PenpotWSController:
         except websockets.exceptions.ConnectionClosed:
             logger.info("Plugin disconnected normally.")
         except Exception as e:
-            logger.error(f"WebSocket Error: {e}")
+            logger.error("WebSocket Error: %s", e)
         finally:
-            self.active_connections.remove(websocket)
+            self.active_connections.discard(websocket)
             logger.info("Plugin connection closed.")
 
-    def _handle_plugin_message(self, data: Dict[str, Any]):
+    def _handle_plugin_message(self, data: Dict[str, Any]) -> None:
         """Parse passive intents from the plugin (e.g., selection changes)."""
         msg_type = data.get("type")
 
         if msg_type == "selectionchange":
             # Phase 3: Selection Context Updates
             self.active_selection = data.get("ids", [])
-            logger.debug(f"Live selection updated: {len(self.active_selection)} shapes")
+            logger.debug("Live selection updated: %d shapes", len(self.active_selection))
 
         elif msg_type == "ack":
-            logger.debug(f"Plugin ACK received for command {data.get('command_id')}")
+            logger.debug("Plugin ACK received for command %s", data.get("command_id"))
 
     async def send_command(self, script: str) -> bool:
         """Send a JS script/command to be executed on the Plugin canvas.
@@ -83,17 +102,41 @@ class PenpotWSController:
 
         return True
 
-    async def start(self):
-        """Start the WebSocket server."""
-        logger.info(f"Starting Plugin WebSocket Server on ws://{self.host}:{self.port}")
-        start_server = websockets.serve(self._handler, self.host, self.port)
-        self._server = await start_server
+    async def start(self) -> None:
+        """Start the WebSocket server if enabled and configured with a token."""
+        if not settings.ws_enabled:
+            logger.info(
+                "Plugin WebSocket bridge disabled (set WS_ENABLED=true and WS_TOKEN to enable)"
+            )
+            return
+        if not settings.ws_token:
+            logger.warning(
+                "WS_ENABLED=true but WS_TOKEN is empty; refusing to start unauthenticated WebSocket bridge"
+            )
+            return
 
-    async def stop(self):
+        self.host = settings.ws_host
+        self.port = settings.ws_port
+        logger.info(
+            "Starting Plugin WebSocket Server on ws://%s:%d (origin=%s)",
+            self.host,
+            self.port,
+            settings.plugin_origin,
+        )
+        self._server = await websockets.serve(
+            self._handler,
+            self.host,
+            self.port,
+            origins=[websockets.Origin(settings.plugin_origin)],
+            process_request=self._check_token,
+        )
+
+    async def stop(self) -> None:
         """Stop the WebSocket server."""
-        if hasattr(self, "_server"):
+        if self._server is not None:
             self._server.close()
             await self._server.wait_closed()
+            self._server = None
             logger.info("WebSocket Server stopped.")
 
 

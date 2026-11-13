@@ -41,6 +41,15 @@ class PenpotDB:
             rows = await conn.fetch(query, *args)
             return [dict(r) for r in rows]
 
+    async def fetch_readonly(self, query: str, *args: Any) -> list[dict]:
+        """Execute a free-form query inside a read-only transaction with a statement timeout."""
+        async with self.acquire() as conn:
+            async with conn.transaction(readonly=True):
+                timeout_ms = max(1000, int(settings.db_statement_timeout_ms))
+                await conn.execute(f"SET LOCAL statement_timeout = {timeout_ms}")
+                rows = await conn.fetch(query, *args)
+                return [dict(r) for r in rows]
+
     async def fetchrow(self, query: str, *args: Any) -> dict | None:
         async with self.acquire() as conn:
             row = await conn.fetchrow(query, *args)

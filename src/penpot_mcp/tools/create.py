@@ -544,7 +544,7 @@ async def create_component_instance(
         y: Y coordinate for the instance.
         parent_id: Optional parent frame/group UUID.
     """
-    from penpot_mcp.services.changes import change_add_obj, get_file_info
+    from penpot_mcp.services.changes import change_add_obj
     from penpot_mcp.tools.shapes import _decode_shape_obj
 
     # 1. Fetch file data
