@@ -161,7 +161,7 @@ _KNOWN_OPS = (
 )
 
 
-def _extract_op_types_from_fressian(data: bytes) -> list[str]:
+def _extract_op_types_from_fressian(data: bytes | bytearray) -> list[str]:
     """Scan Fressian binary for known Penpot operation type strings."""
     found = []
     for op in _KNOWN_OPS:

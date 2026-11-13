@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
 from penpot_mcp.services.api import api
 from penpot_mcp.services.changes import get_file_info, new_uuid
@@ -72,7 +73,7 @@ async def create_color(
         raise ValueError("Must specify either color or gradient")
 
     color_id = new_uuid()
-    asset = {
+    asset: dict[str, Any] = {
         "id": color_id,
         "name": name.strip(),
         "path": path.strip("/"),
@@ -80,7 +81,7 @@ async def create_color(
     if color is not None:
         asset["color"] = _normalize_hex_color(color)
         asset["opacity"] = _validate_opacity(opacity)
-    else:
+    elif gradient is not None:
         asset["gradient"] = _normalize_gradient(gradient)
         
     info = await get_file_info(file_id)
@@ -111,7 +112,7 @@ async def update_color(
         raise ValueError(f"Color asset {color_id} not found in file {file_id}")
 
     existing_opacity = existing.get("opacity")
-    asset = {
+    asset: dict[str, Any] = {
         "id": color_id,
         "name": existing["name"] if name is None else name.strip(),
         "path": existing.get("path", "") if path is None else path.strip("/"),
