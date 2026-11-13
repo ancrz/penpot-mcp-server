@@ -1,17 +1,17 @@
 [project]
 name = "penpot-mcp"
-version = "0.1.0"
+version = "0.2.0"
 description = "MCP server for self-hosted Penpot — AI-powered UI/UX design and prototyping"
 readme = {text = "", content-type = "text/plain"}
 requires-python = ">=3.13"
 dependencies = [
-    "mcp[cli]>=1.9.0,<2",
-    "asyncpg>=0.30.0",
-    "httpx>=0.28.0",
-    "pydantic>=2.10.0",
-    "pydantic-settings>=2.7.0",
-    "uvicorn>=0.34.0",
-    "websockets>=16.0",
+    "mcp[cli]>=1.30.0,<2",
+    "asyncpg>=0.32.0",
+    "httpx>=0.28.1",
+    "pydantic>=2.14.3",
+    "pydantic-settings>=2.16.3",
+    "uvicorn>=0.54.0",
+    "websockets>=17.4",
 ]
 
 [project.scripts]
@@ -36,10 +36,10 @@ markers = [
 
 [dependency-groups]
 dev = [
-    "mypy>=1.19.1",
-    "pytest>=8.0",
-    "pytest-asyncio>=0.25.0",
-    "ruff>=0.15.2",
+    "mypy>=2.4.1",
+    "pytest>=9.2.0",
+    "pytest-asyncio>=1.5.0",
+    "ruff>=0.17.5",
 ]
 
 [tool.mypy]
@@ -48,3 +48,9 @@ python_version = "3.13"
 [[tool.mypy.overrides]]
 module = ["asyncpg", "asyncpg.*"]
 ignore_missing_imports = true
+
+[tool.ruff]
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]

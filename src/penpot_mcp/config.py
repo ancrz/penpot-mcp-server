@@ -6,6 +6,10 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
+    # Version & protocol
+    penpot_mcp_version: str = "0.2.0"
+    mcp_protocol_version: str = "2025-03-26"
+
     # Penpot connection
     penpot_base_url: str = "http://penpot-frontend:8080"
     penpot_public_url: str = "http://localhost:9001"
@@ -39,7 +43,7 @@ class Settings(BaseSettings):
     plugin_ws_url: str = "ws://localhost:4402"
     plugin_origin: str = "http://localhost:8787"
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
     @property
     def db_dsn(self) -> str:

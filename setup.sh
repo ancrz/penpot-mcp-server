@@ -137,7 +137,20 @@ fi
 
 header "Building Docker image"
 
-docker compose build penpot-mcp 2>/dev/null || docker build -t penpot-mcp .
+penpot_mcp_version=$(grep '^PENPOT_MCP_VERSION=' .env 2>/dev/null | cut -d= -f2 || true)
+penpot_mcp_version="${penpot_mcp_version:-0.2.0}"
+python_image_tag=$(grep '^PYTHON_IMAGE_TAG=' .env 2>/dev/null | cut -d= -f2 || true)
+python_image_tag="${python_image_tag:-3.13-alpine}"
+uv_version=$(grep '^UV_VERSION=' .env 2>/dev/null | cut -d= -f2 || true)
+uv_version="${uv_version:-0.12.10}"
+mcp_protocol_version=$(grep '^MCP_PROTOCOL_VERSION=' .env 2>/dev/null | cut -d= -f2 || true)
+mcp_protocol_version="${mcp_protocol_version:-2025-03-26}"
+
+docker compose build penpot-mcp 2>/dev/null || docker build \
+    --build-arg PYTHON_IMAGE_TAG="${python_image_tag}" \
+    --build-arg UV_VERSION="${uv_version}" \
+    --build-arg PENPOT_MCP_VERSION="${penpot_mcp_version}" \
+    -t "penpot-mcp:${penpot_mcp_version}" .
 info "Docker image built successfully"
 
 # ── Start ────────────────────────────────────────────────
@@ -172,7 +185,7 @@ mcp_port="${mcp_port:-8787}"
 
 if curl -sf "http://localhost:${mcp_port}/mcp" \
     -H "Content-Type: application/json" \
-    -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"setup","version":"1.0"}}}' \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"${mcp_protocol_version}\",\"capabilities\":{},\"clientInfo\":{\"name\":\"setup\",\"version\":\"${penpot_mcp_version}\"}}}" \
     > /dev/null 2>&1; then
     info "MCP server is running on port ${mcp_port}"
 else
