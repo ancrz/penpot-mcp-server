@@ -642,13 +642,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "redis" },
+    { name = "sqlite-vec" },
     { name = "uvicorn" },
     { name = "websockets" },
-]
-
-[package.optional-dependencies]
-sqlite-vec = [
-    { name = "sqlite-vec" },
 ]
 
 [package.dev-dependencies]
@@ -658,7 +654,6 @@ dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "ruff" },
-    { name = "sqlite-vec" },
 ]
 
 [package.metadata]
@@ -669,11 +664,10 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.14.3" },
     { name = "pydantic-settings", specifier = ">=2.16.3" },
     { name = "redis", specifier = ">=5.2.0" },
-    { name = "sqlite-vec", marker = "extra == 'sqlite-vec'", specifier = ">=0.1.9" },
+    { name = "sqlite-vec", specifier = ">=0.1.9" },
     { name = "uvicorn", specifier = ">=0.54.0" },
     { name = "websockets", specifier = ">=17.4" },
 ]
-provides-extras = ["sqlite-vec"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -682,7 +676,6 @@ dev = [
     { name = "pytest", specifier = ">=9.2.0" },
     { name = "pytest-asyncio", specifier = ">=1.5.0" },
     { name = "ruff", specifier = ">=0.17.5" },
-    { name = "sqlite-vec", specifier = ">=0.1.9" },
 ]
 
 [[package]]

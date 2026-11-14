@@ -49,7 +49,7 @@ services:
       dockerfile: Dockerfile
       args:
         PENPOT_MCP_VERSION: "${PENPOT_MCP_VERSION:-0.6.0}"
-        PYTHON_IMAGE_TAG: "${PYTHON_IMAGE_TAG:-3.13-alpine}"
+        PYTHON_IMAGE_TAG: "${PYTHON_IMAGE_TAG:-3.14-slim}"
         UV_VERSION: "${UV_VERSION:-0.12.10}"
     container_name: penpot-mcp
     restart: unless-stopped

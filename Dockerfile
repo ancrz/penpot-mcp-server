@@ -1,4 +1,4 @@
-ARG PYTHON_IMAGE_TAG=3.14-alpine
+ARG PYTHON_IMAGE_TAG=3.14-slim
 ARG UV_VERSION=0.12.10
 ARG PENPOT_MCP_VERSION=0.7.0
 
@@ -34,8 +34,6 @@ RUN if command -v apk >/dev/null 2>&1; then \
         useradd --create-home --shell /usr/sbin/nologin appuser; \
     fi && \
     rm -rf /usr/local/lib/python*/ensurepip \
-           /usr/local/lib/python*/lib-dynload/_sqlite3* \
-           /usr/local/lib/python*/sqlite3 \
            /usr/local/lib/python*/site-packages/pip* \
            /usr/local/lib/python*/site-packages/setuptools* \
            /usr/local/lib/python*/site-packages/wheel*

@@ -13,10 +13,8 @@ dependencies = [
     "redis>=5.2.0",
     "uvicorn>=0.54.0",
     "websockets>=17.4",
+    "sqlite-vec>=0.1.9",
 ]
-
-[project.optional-dependencies]
-sqlite-vec = ["sqlite-vec>=0.1.9"]
 
 [project.scripts]
 penpot-mcp = "penpot_mcp.server:main"
@@ -49,7 +47,6 @@ dev = [
     "pytest>=9.2.0",
     "pytest-asyncio>=1.5.0",
     "ruff>=0.17.5",
-    "sqlite-vec>=0.1.9",
 ]
 
 [tool.mypy]
