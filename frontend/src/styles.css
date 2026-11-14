@@ -620,6 +620,27 @@ body {
   background: rgba(56, 189, 248, 0.22);
 }
 
+.chat-sessions-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--border);
+}
+
+.chat-select {
+  flex: 1;
+  min-width: 0;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-0);
+  color: var(--text-0);
+  padding: 6px 10px;
+  font-size: 12px;
+  font-family: inherit;
+}
+
 /* Cards & Forms */
 .card {
   background: var(--bg-1);

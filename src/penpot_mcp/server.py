@@ -297,7 +297,84 @@ async def agent_chat_route(request):
             else None
         ),
     )
+    eff_sid = str(payload.get("session_id") or "default")
+    try:
+        from datetime import datetime
+        existing = await db.get_chat_session(eff_sid)
+        msgs = list(existing.get("messages") or []) if existing else []
+        now_hm = datetime.now().strftime("%H:%M")
+        msgs.append({"id": f"u-{len(msgs)}", "role": "user", "text": prompt or quick_action or "", "timestamp": now_hm})
+        msgs.append({
+            "id": f"a-{len(msgs)}",
+            "role": "assistant",
+            "text": turn.reply,
+            "trace": turn.tool_trace,
+            "createdShapes": turn.created_shapes,
+            "artifacts": turn.artifacts,
+            "latencyMs": turn.latency_ms,
+            "timestamp": now_hm,
+        })
+        title = (
+            existing.get("title")
+            if existing and existing.get("title") not in ("", "Nuevo chat")
+            else ((prompt or quick_action or "Sesión").strip()[:48] or "Sesión")
+        )
+        cur_revn = int((turn.canvas_delta or {}).get("current_revn") or 0)
+        await db.upsert_chat_session(
+            eff_sid,
+            user_id=str(turn.user_id or ""),
+            file_id=str(turn.file_id or ""),
+            title=title,
+            messages=msgs,
+            sandbox_persistent=turn.sandbox_persistent,
+            last_revn=cur_revn,
+        )
+    except Exception as exc:
+        logger.debug("Chat session persistence notice: %s", exc)
     return JSONResponse(asdict(turn), headers=_cors_headers())
+
+
+@mcp.custom_route("/agent/chats", methods=["GET", "OPTIONS"])
+async def agent_chats_list_route(request):
+    """List persisted multi-day chat sessions."""
+    from starlette.responses import Response
+
+    if request.method == "OPTIONS":
+        return Response(status_code=204, headers=_cors_headers())
+    uid = request.query_params.get("user_id") or ""
+    rows = await db.list_chat_sessions(user_id=uid, limit=30)
+    return JSONResponse({"status": "OK", "sessions": rows}, headers=_cors_headers())
+
+
+@mcp.custom_route("/agent/chats/{session_id}", methods=["GET", "POST", "DELETE", "OPTIONS"])
+async def agent_chat_session_route(request):
+    """Load, create/update, or delete a persisted multi-day chat session."""
+    from starlette.responses import Response
+    from penpot_mcp.services.sandbox_sessions import sandbox_sessions
+
+    if request.method == "OPTIONS":
+        return Response(status_code=204, headers=_cors_headers())
+    sid = request.path_params.get("session_id") or "default"
+    if request.method == "GET":
+        sess = await db.get_chat_session(sid)
+        if not sess:
+            sess = await db.upsert_chat_session(sid, title="Nuevo chat", messages=[])
+        sb = await sandbox_sessions.get_session(sid)
+        return JSONResponse({"status": "OK", "session": sess, "sandbox": sb}, headers=_cors_headers())
+    if request.method == "POST":
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        sess = await db.upsert_chat_session(
+            sid,
+            title=body.get("title"),
+            messages=body.get("messages") if isinstance(body.get("messages"), list) else None,
+            sandbox_persistent=body.get("sandbox_persistent"),
+        )
+        return JSONResponse({"status": "OK", "session": sess}, headers=_cors_headers())
+    deleted = await db.delete_chat_session(sid)
+    return JSONResponse({"status": "OK", "deleted": deleted}, headers=_cors_headers())
 
 
 @mcp.custom_route("/agent/sandbox/session", methods=["GET", "OPTIONS"])

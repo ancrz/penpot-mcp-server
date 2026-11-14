@@ -111,8 +111,23 @@ export const UploadResponseSchema = z.object({
   error: z.string().optional(),
 });
 
+export const ChatSessionSummarySchema = z.object({
+  session_id: z.string(),
+  title: z.string().default("Sesión"),
+  sandbox_persistent: z.boolean().optional().default(false),
+  last_revn: z.number().optional().default(0),
+  message_count: z.number().optional().default(0),
+  updated_at: z.string().optional().default(""),
+});
+
+export const ChatSessionListSchema = z.object({
+  status: z.string(),
+  sessions: z.array(ChatSessionSummarySchema).default([]),
+});
+
 export type AgentStatus = z.infer<typeof AgentStatusSchema>;
 export type AgentChatResponse = z.infer<typeof AgentChatResponseSchema>;
 export type PenpotUserRow = z.infer<typeof PenpotUserRowSchema>;
 export type PgvectorVisionResponse = z.infer<typeof PgvectorVisionResponseSchema>;
 export type UploadedAttachment = z.infer<typeof UploadedAttachmentSchema>;
+export type ChatSessionSummary = z.infer<typeof ChatSessionSummarySchema>;

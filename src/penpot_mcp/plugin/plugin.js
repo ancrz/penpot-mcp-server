@@ -92,6 +92,14 @@ function broadcastContext(commandId) {
 }
 
 // 1. Listen for canvas events and stream context to UI iframe
+let _changeDebounce = null;
+function scheduleBroadcast() {
+  if (_changeDebounce) clearTimeout(_changeDebounce);
+  _changeDebounce = setTimeout(() => {
+    broadcastContext(null);
+  }, 250);
+}
+
 try {
   penpot.on("selectionchange", () => {
     broadcastContext(null);
@@ -101,6 +109,18 @@ try {
 try {
   penpot.on("pagechange", () => {
     broadcastContext(null);
+  });
+} catch (_e) {}
+
+try {
+  penpot.on("filechange", () => {
+    scheduleBroadcast();
+  });
+} catch (_e) {}
+
+try {
+  penpot.on("shapechange", () => {
+    scheduleBroadcast();
   });
 } catch (_e) {}
 

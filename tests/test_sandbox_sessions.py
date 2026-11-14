@@ -47,3 +47,24 @@ def test_resolve_sandbox_download_guards(tmp_path: Path, monkeypatch: pytest.Mon
 
     with pytest.raises(FileNotFoundError):
         resolve_sandbox_download("outputs/missing.webp")
+
+
+@pytest.mark.asyncio
+async def test_canvas_delta_without_pool_and_turn_result() -> None:
+    from penpot_mcp.agent_gateway import AgentTurnResult
+    from penpot_mcp.services.db import PenpotDB
+
+    db = PenpotDB()
+    delta = await db.get_canvas_delta_since("file-1", 0)
+    assert delta == {"changed": False, "current_revn": 0, "recent_changes": []}
+
+    turn = AgentTurnResult(
+        status="OK",
+        reply="ok",
+        provider_used="gemini",
+        model_used="gemini-2.5-flash",
+        tier_used="fast",
+        canvas_delta={"changed": True, "current_revn": 11, "recent_changes": [{"revn": 11}]},
+    )
+    assert turn.canvas_delta is not None
+    assert turn.canvas_delta["current_revn"] == 11

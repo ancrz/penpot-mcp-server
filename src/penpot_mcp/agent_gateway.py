@@ -1241,6 +1241,7 @@ class AgentTurnResult:
     tool_trace: list[dict[str, Any]] = field(default_factory=list)
     artifacts: list[dict[str, Any]] = field(default_factory=list)
     sandbox_persistent: bool = False
+    canvas_delta: Optional[dict[str, Any]] = None
     fallback_reasons: list[str] = field(default_factory=list)
     latency_ms: float = 0.0
 
@@ -2616,6 +2617,13 @@ class PenpotAgentGateway:
             session_id=session_id,
             file_id=canvas_ctx.get("file_id"),
         )
+        from penpot_mcp.services.db import db
+
+        persisted_chat = await db.get_chat_session(eff_sid)
+        prev_revn = persisted_chat.get("last_revn") if persisted_chat else None
+        canvas_delta = await db.get_canvas_delta_since(
+            str(canvas_ctx.get("file_id") or ""), prev_revn
+        )
         vision_ctx = await sync_and_query_canvas_vision(
             file_id=canvas_ctx.get("file_id"),
             page_id=canvas_ctx.get("page_id"),
@@ -2698,6 +2706,14 @@ class PenpotAgentGateway:
             if att_blocks
             else ""
         )
+        delta_section = (
+            "\n\n=== MANUAL / CANVAS CHANGES SINCE LAST TURN ===\n"
+            f"revn {canvas_delta.get('previous_revn')} -> {canvas_delta.get('current_revn')}: "
+            + json.dumps(canvas_delta.get("recent_changes") or [], default=str)
+            + "\n================================================="
+            if canvas_delta.get("changed")
+            else ""
+        )
         system_prompt = (
             "You are Penpot AI Studio, an expert UI/UX design agent embedded inside Penpot via the "
             "Penpot MCP Hybrid Gateway and SDK Agent Pipeline.\n"
@@ -2720,6 +2736,7 @@ class PenpotAgentGateway:
             f"call `create_ui_artifact` or `run_penpot_batch` immediately (using free coordinates x={rec_xy.get('x', 80)}, y={rec_xy.get('y', 80)} so you do not overlap existing frames).\n"
             "2. You CAN see the canvas via the PGVECTOR SEMANTIC & SPATIAL CANVAS VISION EYE above! When the user asks what is on the canvas or refers to a specific shape/color/text, use the exact shape_id, coordinates, colors, and texts from the Vision Eye (or call `query_canvas_vision_pgvector` / `call_penpot_branch_tool`).\n"
             "3. Keep your final response concise and in the user's language (Spanish or English)."
+            f"{delta_section}"
             f"{attachments_section}"
             f"{addendum_block}"
         )
@@ -2846,6 +2863,7 @@ class PenpotAgentGateway:
             tool_trace=tool_trace,
             artifacts=turn_artifacts,
             sandbox_persistent=bool(sb_state.get("persistent")),
+            canvas_delta=canvas_delta,
             fallback_reasons=fallback_reasons,
             latency_ms=latency,
         )

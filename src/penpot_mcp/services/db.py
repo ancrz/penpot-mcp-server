@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import json
 import logging
 from typing import Any
 
@@ -104,6 +105,33 @@ class PenpotDB:
                     """
                     CREATE INDEX IF NOT EXISTS mcp_canvas_vision_hnsw_idx
                         ON public.mcp_canvas_vision_index USING hnsw (embedding vector_cosine_ops);
+                    """
+                )
+                await conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS public.mcp_chat_sessions (
+                        session_id TEXT PRIMARY KEY,
+                        user_id TEXT NOT NULL DEFAULT '',
+                        file_id TEXT NOT NULL DEFAULT '',
+                        title TEXT NOT NULL DEFAULT 'Sesión principal',
+                        messages JSONB NOT NULL DEFAULT '[]'::jsonb,
+                        sandbox_persistent BOOLEAN NOT NULL DEFAULT FALSE,
+                        last_revn INTEGER NOT NULL DEFAULT 0,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+                    );
+                    """
+                )
+                await conn.execute(
+                    """
+                    INSERT INTO public.mcp_chat_sessions (session_id, title, messages, sandbox_persistent)
+                    VALUES (
+                        'default',
+                        'Sesión principal',
+                        '[{"id":"welcome","role":"assistant","text":"Penpot AI Studio listo. Conectado al Gateway MCP, Go WebSocket Hub, Valkey 8.1 y PostgreSQL 17 + pgvector.","timestamp":"inicio"}]'::jsonb,
+                        FALSE
+                    )
+                    ON CONFLICT (session_id) DO NOTHING;
                     """
                 )
         except Exception as exc:
@@ -895,6 +923,185 @@ class PenpotDB:
             """,
             max(1, min(int(limit), 100)),
         )
+
+    async def get_canvas_delta_since(
+        self, file_id: str, since_revn: int | None = None
+    ) -> dict[str, Any]:
+        """Detect manual/external Penpot file_change revisions since `since_revn`."""
+        if not self._pool or not file_id:
+            return {"current_revn": 0, "changed": False, "recent_changes": []}
+        rows = await self.fetch(
+            "SELECT revn FROM public.file WHERE id::text = $1 AND deleted_at IS NULL",
+            file_id.strip(),
+        )
+        current_revn = int(rows[0]["revn"]) if rows else 0
+        base_revn = int(since_revn) if since_revn is not None else current_revn
+        if current_revn <= base_revn:
+            return {"current_revn": current_revn, "changed": False, "recent_changes": []}
+        changes = await self.fetch(
+            """
+            SELECT fc.revn, fc.label, fc.created_at, COALESCE(p.fullname, p.email, 'manual') AS author
+            FROM public.file_change fc
+            LEFT JOIN public.profile p ON p.id = fc.profile_id
+            WHERE fc.file_id::text = $1 AND fc.revn > $2
+            ORDER BY fc.revn DESC
+            LIMIT 8
+            """,
+            file_id.strip(),
+            base_revn,
+        )
+        # Invalidate cached vision & file metadata so the agent sees fresh state
+        await self.cache.bump_namespace("vision")
+        await self.cache.bump_namespace("file")
+        return {
+            "current_revn": current_revn,
+            "previous_revn": base_revn,
+            "changed": True,
+            "recent_changes": [
+                {
+                    "revn": int(c["revn"]),
+                    "label": c.get("label") or "manual-edit",
+                    "author": c.get("author") or "user",
+                    "created_at": str(c.get("created_at") or ""),
+                }
+                for c in changes
+            ],
+        }
+
+    async def list_chat_sessions(self, user_id: str = "", limit: int = 25) -> list[dict[str, Any]]:
+        """List persisted multi-day chat sessions from PostgreSQL."""
+        if not self._pool:
+            return []
+        if user_id:
+            rows = await self.fetch(
+                """
+                SELECT session_id, user_id, file_id, title, sandbox_persistent, last_revn,
+                       jsonb_array_length(messages) AS message_count, updated_at
+                FROM public.mcp_chat_sessions
+                WHERE user_id = $1 OR user_id = ''
+                ORDER BY updated_at DESC
+                LIMIT $2
+                """,
+                user_id,
+                max(1, min(int(limit), 100)),
+            )
+        else:
+            rows = await self.fetch(
+                """
+                SELECT session_id, user_id, file_id, title, sandbox_persistent, last_revn,
+                       jsonb_array_length(messages) AS message_count, updated_at
+                FROM public.mcp_chat_sessions
+                ORDER BY updated_at DESC
+                LIMIT $1
+                """,
+                max(1, min(int(limit), 100)),
+            )
+        return [
+            {
+                **r,
+                "updated_at": str(r.get("updated_at") or ""),
+            }
+            for r in rows
+        ]
+
+    async def get_chat_session(self, session_id: str) -> dict[str, Any] | None:
+        """Load a persisted chat session (messages, sandbox_persistent, last_revn)."""
+        if not self._pool or not session_id:
+            return None
+        rows = await self.fetch(
+            """
+            SELECT session_id, user_id, file_id, title, messages, sandbox_persistent, last_revn, updated_at
+            FROM public.mcp_chat_sessions
+            WHERE session_id = $1
+            """,
+            session_id.strip(),
+        )
+        if not rows:
+            return None
+        row = dict(rows[0])
+        msgs = row.get("messages")
+        if isinstance(msgs, str):
+            row["messages"] = json.loads(msgs)
+        row["updated_at"] = str(row.get("updated_at") or "")
+        return row
+
+    async def upsert_chat_session(
+        self,
+        session_id: str,
+        *,
+        user_id: str = "",
+        file_id: str = "",
+        title: str | None = None,
+        messages: list[dict[str, Any]] | None = None,
+        sandbox_persistent: bool | None = None,
+        last_revn: int | None = None,
+    ) -> dict[str, Any]:
+        """Create or update a persisted multi-day chat session."""
+        if not self._pool:
+            return {
+                "session_id": session_id,
+                "title": title or "Sesión",
+                "messages": messages or [],
+                "sandbox_persistent": bool(sandbox_persistent),
+                "last_revn": last_revn or 0,
+            }
+        existing = await self.get_chat_session(session_id)
+        eff_title = title or (existing.get("title") if existing else "Nuevo chat") or "Nuevo chat"
+        raw_msgs = messages if messages is not None else (existing.get("messages") if existing else [])
+        eff_msgs: list[dict[str, Any]] = list(raw_msgs) if isinstance(raw_msgs, list) else []
+        eff_pers = (
+            bool(sandbox_persistent)
+            if sandbox_persistent is not None
+            else bool(existing.get("sandbox_persistent") if existing else False)
+        )
+        eff_revn = (
+            int(last_revn)
+            if last_revn is not None
+            else int((existing or {}).get("last_revn") or 0)
+        )
+        eff_uid = user_id or (existing.get("user_id") if existing else "") or ""
+        eff_fid = file_id or (existing.get("file_id") if existing else "") or ""
+        async with self.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO public.mcp_chat_sessions
+                    (session_id, user_id, file_id, title, messages, sandbox_persistent, last_revn, updated_at)
+                VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, clock_timestamp())
+                ON CONFLICT (session_id) DO UPDATE SET
+                    user_id = CASE WHEN EXCLUDED.user_id <> '' THEN EXCLUDED.user_id ELSE public.mcp_chat_sessions.user_id END,
+                    file_id = CASE WHEN EXCLUDED.file_id <> '' THEN EXCLUDED.file_id ELSE public.mcp_chat_sessions.file_id END,
+                    title = EXCLUDED.title,
+                    messages = EXCLUDED.messages,
+                    sandbox_persistent = EXCLUDED.sandbox_persistent,
+                    last_revn = GREATEST(public.mcp_chat_sessions.last_revn, EXCLUDED.last_revn),
+                    updated_at = clock_timestamp();
+                """,
+                session_id.strip(),
+                eff_uid,
+                eff_fid,
+                eff_title,
+                json.dumps(eff_msgs[-100:]),
+                eff_pers,
+                eff_revn,
+            )
+        return (await self.get_chat_session(session_id)) or {
+            "session_id": session_id,
+            "title": eff_title,
+            "messages": eff_msgs,
+            "sandbox_persistent": eff_pers,
+            "last_revn": eff_revn,
+        }
+
+    async def delete_chat_session(self, session_id: str) -> bool:
+        """Delete a persisted chat session (except 'default')."""
+        if not self._pool or not session_id or session_id == "default":
+            return False
+        async with self.acquire() as conn:
+            await conn.execute(
+                "DELETE FROM public.mcp_chat_sessions WHERE session_id = $1",
+                session_id.strip(),
+            )
+        return True
 
 
 # Singleton

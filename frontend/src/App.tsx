@@ -4,6 +4,8 @@ import {
   AgentChatResponseSchema,
   AgentStatus,
   AgentStatusSchema,
+  ChatSessionListSchema,
+  ChatSessionSummary,
   PenpotUserRow,
   PenpotUsersResponseSchema,
   PgvectorVisionResponse,
@@ -90,6 +92,14 @@ export default function App() {
   const [uploading, setUploading] = useState(false);
   const [importPenpot, setImportPenpot] = useState(false);
   const [sandboxPersistent, setSandboxPersistent] = useState(false);
+  const [chatSessions, setChatSessions] = useState<ChatSessionSummary[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string>(() => {
+    try {
+      return window.localStorage.getItem("penpot_ai_session_id") || "default";
+    } catch {
+      return "default";
+    }
+  });
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -160,10 +170,66 @@ export default function App() {
     }
   }, []);
 
+  const refreshChatList = useCallback(async () => {
+    try {
+      const res = await fetch("/agent/chats");
+      const parsed = ChatSessionListSchema.parse(await res.json());
+      setChatSessions(parsed.sessions);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const loadChatSession = useCallback(async (sid: string) => {
+    try {
+      window.localStorage.setItem("penpot_ai_session_id", sid);
+    } catch {
+      /* ignore */
+    }
+    setActiveSessionId(sid);
+    try {
+      const res = await fetch(`/agent/chats/${encodeURIComponent(sid)}`);
+      const data = (await res.json()) as {
+        session?: { messages?: ChatMessage[]; sandbox_persistent?: boolean };
+        sandbox?: { persistent?: boolean };
+      };
+      const loadedMsgs = data.session?.messages;
+      if (Array.isArray(loadedMsgs) && loadedMsgs.length > 0) {
+        setMessages(loadedMsgs);
+      } else {
+        setMessages([
+          {
+            id: "welcome",
+            role: "assistant",
+            text: "Nueva sesión lista. Tu historial y configuración de sandbox quedan guardados en PostgreSQL.",
+            timestamp: nowLabel(),
+          },
+        ]);
+      }
+      setSandboxPersistent(Boolean(data.sandbox?.persistent ?? data.session?.sandbox_persistent));
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const createNewChat = async () => {
+    const newSid = `chat-${Date.now().toString(36)}`;
+    await fetch(`/agent/chats/${encodeURIComponent(newSid)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Nuevo chat", messages: [], sandbox_persistent: sandboxPersistent }),
+    });
+    await refreshChatList();
+    await loadChatSession(newSid);
+    setToast(`Nuevo chat creado (${newSid})`);
+  };
+
   useEffect(() => {
     void refreshStatus();
     void refreshUsers();
     void runVisionScan("hero card");
+    void refreshChatList();
+    void loadChatSession(activeSessionId);
 
     let cancelled = false;
     let ws: WebSocket | null = null;
@@ -262,6 +328,7 @@ export default function App() {
         body: JSON.stringify({
           prompt: effectiveText,
           quick_action: quickAction,
+          session_id: activeSessionId,
           attachment_ids: activeAttachments.map((a) => a.id),
           sandbox_persistent: sandboxPersistent,
         }),
@@ -281,6 +348,7 @@ export default function App() {
         },
       ]);
       void refreshStatus();
+      void refreshChatList();
     } catch (err) {
       setMessages((prev) => [
         ...prev,
@@ -472,6 +540,29 @@ export default function App() {
           onDragLeave={() => setDragActive(false)}
           onDrop={handleDrop}
         >
+          <div className="chat-sessions-bar">
+            <label htmlFor={`${baseId}-chat-select`} className="visually-hidden">
+              Conversación guardada
+            </label>
+            <select
+              id={`${baseId}-chat-select`}
+              className="chat-select"
+              value={activeSessionId}
+              onChange={(e) => void loadChatSession(e.target.value)}
+            >
+              {chatSessions.length === 0 && <option value={activeSessionId}>Sesión principal</option>}
+              {chatSessions.map((cs) => (
+                <option key={cs.session_id} value={cs.session_id}>
+                  {cs.sandbox_persistent ? "🔒 " : ""}
+                  {cs.title} ({cs.message_count} msgs)
+                </option>
+              ))}
+            </select>
+            <button type="button" className="btn btn-ghost btn-nowrap" onClick={() => void createNewChat()}>
+              + Nuevo Chat
+            </button>
+          </div>
+
           <div className="quick-strip" aria-label="Acciones rápidas de diseño">
             {QUICK_ACTIONS.map((qa) => (
               <button
@@ -626,7 +717,12 @@ export default function App() {
                       void fetch("/agent/sandbox/policy", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ session_id: "default", persistent: next }),
+                        body: JSON.stringify({ session_id: activeSessionId, persistent: next }),
+                      });
+                      void fetch(`/agent/chats/${encodeURIComponent(activeSessionId)}`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ sandbox_persistent: next }),
                       });
                       setToast(
                         next
