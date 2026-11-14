@@ -1105,6 +1105,27 @@ AGENT_FUNCTION_DECLARATIONS: list[dict[str, Any]] = [
             "required": ["steps"],
         },
     },
+    {
+        "name": "query_canvas_vision_pgvector",
+        "description": (
+            "Query the PostgreSQL pgvector semantic + spatial vision index of the active Penpot page "
+            "to inspect what shapes, frames, colors, and texts are currently visible on the canvas."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "query": {
+                    "type": "STRING",
+                    "description": "Natural language or visual query (e.g. 'purple CTA button', 'hero card title', 'free space').",
+                },
+                "top_k": {
+                    "type": "INTEGER",
+                    "description": "Maximum number of matching shapes to return (default 10).",
+                },
+            },
+            "required": ["query"],
+        },
+    },
 ]
 
 
@@ -1128,6 +1149,10 @@ class AgentTurnResult:
     tier_used: str
     file_id: Optional[str] = None
     page_id: Optional[str] = None
+    user_id: Optional[str] = None
+    user_email: Optional[str] = None
+    user_fullname: Optional[str] = None
+    vision_summary: Optional[dict[str, Any]] = None
     created_shapes: list[dict[str, Any]] = field(default_factory=list)
     tool_trace: list[dict[str, Any]] = field(default_factory=list)
     fallback_reasons: list[str] = field(default_factory=list)
@@ -1262,6 +1287,15 @@ class PenpotAgentGateway:
             "updated_at": None,
             "history": [],
         }
+        self.active_user: dict[str, Any] = {
+            "id": None,
+            "email": settings.penpot_email or "anthony_cruz@outlook.com",
+            "fullname": "Anthony Cruz",
+            "lang": "es",
+            "theme": "default",
+            "resolved_via": "default",
+        }
+        self.user_profiles_cache: dict[str, dict[str, Any]] = {}
         self._seed_from_env()
         self._load_persisted_state()
 
@@ -1353,24 +1387,126 @@ class PenpotAgentGateway:
                 self.active_profile.update(data["active_profile"])
             if isinstance(data.get("agent_instructions"), dict):
                 self.agent_instructions.update(data["agent_instructions"])
+            if isinstance(data.get("active_user"), dict):
+                self.active_user.update(data["active_user"])
+            if isinstance(data.get("user_profiles_cache"), dict):
+                self.user_profiles_cache.update(data["user_profiles_cache"])
         except Exception as exc:
             logger.debug("Could not load persisted gateway config: %s", exc)
 
     def _save_persisted_state(self) -> None:
-        """Persist runtime profiles & credentials with 0600 permissions."""
+        """Persist runtime profiles & credentials with 0600 permissions (including per-user cache)."""
+        import copy
         import os
 
+        uid = str(self.active_user.get("id") or "").strip()
+        if uid:
+            self.user_profiles_cache[uid] = {
+                "email": self.active_user.get("email", ""),
+                "fullname": self.active_user.get("fullname", ""),
+                "active_profile": copy.deepcopy(self.active_profile),
+                "credentials": copy.deepcopy(self.credentials),
+                "agent_instructions": copy.deepcopy(self.agent_instructions),
+            }
         try:
             payload = {
                 "credentials": self.credentials,
                 "active_profile": self.active_profile,
                 "agent_instructions": self.agent_instructions,
+                "active_user": self.active_user,
+                "user_profiles_cache": self.user_profiles_cache,
             }
             with open(self._config_path, "w", encoding="utf-8") as fh:
                 json.dump(payload, fh, indent=2)
             os.chmod(self._config_path, 0o600)
         except Exception as exc:
             logger.debug("Could not persist gateway config: %s", exc)
+
+    async def sync_active_user_to_db(
+        self, file_id: str | None = None, page_id: str | None = None
+    ) -> bool:
+        """Synchronize the active Penpot user's AI profile & keys into public.mcp_user_ai_profile."""
+        from penpot_mcp.services.db import db
+
+        uid = str(self.active_user.get("id") or "").strip()
+        if not uid:
+            return False
+        return await db.save_user_ai_state(
+            profile_id=uid,
+            email=str(self.active_user.get("email") or ""),
+            fullname=str(self.active_user.get("fullname") or ""),
+            active_profile=dict(self.active_profile),
+            credentials=dict(self.credentials),
+            agent_instructions=dict(self.agent_instructions),
+            last_file_id=file_id,
+            last_page_id=page_id,
+        )
+
+    async def switch_or_resolve_user(
+        self,
+        *,
+        user_id: str | None = None,
+        email: str | None = None,
+        session_id: str | None = None,
+        file_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Resolve the authenticated Penpot user and activate their isolated AI profile & credentials."""
+        import copy
+        from penpot_mcp.services.db import db
+
+        current_uid = str(self.active_user.get("id") or "").strip()
+        resolved = await db.resolve_authenticated_penpot_user(
+            user_id=user_id,
+            email=email,
+            session_id=session_id,
+            file_id=file_id,
+        )
+        if not resolved:
+            if user_id or email:
+                self.active_user.update(
+                    {
+                        "id": (user_id or current_uid or "local-user").strip(),
+                        "email": (email or self.active_user.get("email") or "anthony_cruz@outlook.com").strip(),
+                        "fullname": self.active_user.get("fullname") or "Anthony Cruz",
+                        "resolved_via": "fallback_param",
+                    }
+                )
+            return dict(self.active_user)
+
+        new_uid = str(resolved.get("id") or "").strip()
+        if current_uid and current_uid != new_uid:
+            # Save previous user's state before switching
+            self._save_persisted_state()
+            await self.sync_active_user_to_db(file_id=file_id)
+
+        self.active_user = {
+            "id": new_uid,
+            "email": str(resolved.get("email") or ""),
+            "fullname": str(resolved.get("fullname") or ""),
+            "lang": str(resolved.get("lang") or "es"),
+            "theme": str(resolved.get("theme") or "default"),
+            "default_team_id": resolved.get("default_team_id"),
+            "default_project_id": resolved.get("default_project_id"),
+            "resolved_via": str(resolved.get("resolved_via") or "profile"),
+        }
+
+        # Load this user's AI profile from PostgreSQL (or in-memory cache), seeding if first login
+        db_state = await db.get_user_ai_state(new_uid)
+        cached_state = self.user_profiles_cache.get(new_uid)
+        target_state = db_state or cached_state
+
+        if target_state and isinstance(target_state.get("credentials"), dict) and target_state["credentials"]:
+            self.credentials = copy.deepcopy(target_state["credentials"])
+            if isinstance(target_state.get("active_profile"), dict) and target_state["active_profile"]:
+                self.active_profile.update(target_state["active_profile"])
+            if isinstance(target_state.get("agent_instructions"), dict) and target_state["agent_instructions"]:
+                self.agent_instructions.update(target_state["agent_instructions"])
+        else:
+            # First time this Penpot user activates AI Studio -> persist their initial profile in PostgreSQL
+            self._save_persisted_state()
+            await self.sync_active_user_to_db(file_id=file_id)
+
+        return dict(self.active_user)
 
     def list_catalog(self) -> list[dict[str, Any]]:
         """Return the provider credentials catalog with masked keys (write-only security)."""
@@ -1699,6 +1835,7 @@ class PenpotAgentGateway:
         status = self.get_status()
         return {
             "status": "ok",
+            "active_user": dict(self.active_user),
             "active_profile": dict(self.active_profile),
             "presets": PRESETS_CATALOG,
             "providers_catalog": PROVIDERS_CATALOG,
@@ -1805,6 +1942,7 @@ class PenpotAgentGateway:
         live_ctx = gateway.active_context
         return {
             "status": "ok",
+            "active_user": dict(self.active_user),
             "agent_mode": self.active_profile.get("preset", settings.penpot_agent_mode),
             "active_account": self.active_profile.get("account", "google-primary"),
             "active_provider": self.active_profile.get("provider", "gemini"),
@@ -2031,6 +2169,13 @@ class PenpotAgentGateway:
             if not file_id or not page_id:
                 return {"status": "ERROR", "error": "No active file_id/page_id available."}
             template_kind = str(fn_args.get("template_kind") or "hero_card")
+            rec_origin = canvas_ctx.get("recommended_free_origin") or {"x": 80.0, "y": 80.0}
+            default_x = float(rec_origin.get("x", 80.0))
+            default_y = float(rec_origin.get("y", 80.0))
+            raw_x = fn_args.get("x")
+            raw_y = fn_args.get("y")
+            eff_x = float(raw_x) if raw_x is not None and float(raw_x) != 80.0 else default_x
+            eff_y = float(raw_y) if raw_y is not None and float(raw_y) != 80.0 else default_y
             batch_name, steps = build_ui_template_steps(
                 template_kind=template_kind,
                 file_id=file_id,
@@ -2039,8 +2184,8 @@ class PenpotAgentGateway:
                 subtitle=fn_args.get("subtitle"),
                 cta_text=fn_args.get("cta_text"),
                 accent_color=str(fn_args.get("accent_color") or "#6366F1"),
-                x=float(fn_args.get("x", 80)),
-                y=float(fn_args.get("y", 80)),
+                x=eff_x,
+                y=eff_y,
             )
             raw_str = await playbook_run(
                 action="code",
@@ -2139,6 +2284,28 @@ class PenpotAgentGateway:
             )
             return res
 
+        if fn_name == "query_canvas_vision_pgvector":
+            from penpot_mcp.services.vision import sync_and_query_canvas_vision
+
+            query_str = str(fn_args.get("query") or "")
+            top_k = int(fn_args.get("top_k") or 10)
+            vis = await sync_and_query_canvas_vision(
+                file_id=file_id,
+                page_id=page_id,
+                query_text=query_str,
+                top_k=top_k,
+            )
+            duration_ms = round((time.monotonic() - started) * 1000, 2)
+            tool_trace.append(
+                {
+                    "tool": "pgvector_vision",
+                    "action": f"semantic_search ({query_str[:24]})",
+                    "status": "OK",
+                    "duration_ms": duration_ms,
+                }
+            )
+            return vis
+
         return {"status": "ERROR", "error": f"Unknown agent function {fn_name!r}"}
 
     async def _run_deterministic_turn(
@@ -2153,6 +2320,28 @@ class PenpotAgentGateway:
         lower = (quick_action or prompt or "").strip().lower()
         file_id = canvas_ctx.get("file_id")
         page_id = canvas_ctx.get("page_id")
+
+        if any(
+            k in lower
+            for k in (
+                "vision_scan",
+                "pgvector",
+                "que hay en",
+                "qué hay en",
+                "que ves",
+                "qué ves",
+                "ojos",
+                "what is on",
+            )
+        ):
+            vis_res = await self._execute_agent_tool_call(
+                "query_canvas_vision_pgvector",
+                {"query": prompt or "hero card title button frame", "top_k": 10},
+                canvas_ctx,
+                tool_trace,
+                created_shapes,
+            )
+            return str(vis_res.get("prompt_eye_summary") or json.dumps(vis_res, default=str)[:400])
 
         if any(k in lower for k in ("bind_tokens", "token", "tokens", "auto_bind")):
             res = await self._execute_agent_tool_call(
@@ -2238,12 +2427,34 @@ class PenpotAgentGateway:
         *,
         file_id: str | None = None,
         page_id: str | None = None,
+        user_id: str | None = None,
+        user_email: str | None = None,
+        session_id: str | None = None,
         quick_action: str | None = None,
         history: list[dict[str, Any]] | None = None,
     ) -> AgentTurnResult:
-        """Run an end-to-end Penpot AI Studio turn with automatic canvas awareness and tool execution."""
+        """Run an end-to-end Penpot AI Studio turn with multi-user profile isolation and pgvector Canvas Vision."""
+        from penpot_mcp.services.vision import sync_and_query_canvas_vision
+
         started = time.monotonic()
         canvas_ctx = await self.resolve_target_canvas(file_id=file_id, page_id=page_id)
+        active_user = await self.switch_or_resolve_user(
+            user_id=user_id,
+            email=user_email,
+            session_id=session_id,
+            file_id=canvas_ctx.get("file_id"),
+        )
+        vision_ctx = await sync_and_query_canvas_vision(
+            file_id=canvas_ctx.get("file_id"),
+            page_id=canvas_ctx.get("page_id"),
+            query_text=prompt or quick_action or "",
+            top_k=10,
+        )
+        canvas_ctx["recommended_free_origin"] = vision_ctx.get(
+            "recommended_free_origin", {"x": 80.0, "y": 80.0}
+        )
+        canvas_ctx["vision_summary"] = vision_ctx
+
         tool_trace: list[dict[str, Any]] = []
         created_shapes: list[dict[str, Any]] = []
 
@@ -2255,6 +2466,7 @@ class PenpotAgentGateway:
             "navbar",
             "bind_tokens",
             "inspect_css",
+            "vision_scan",
         ):
             reply_text = await self._run_deterministic_turn(
                 prompt or quick_action,
@@ -2277,6 +2489,15 @@ class PenpotAgentGateway:
                 tier_used="quick-action",
                 file_id=canvas_ctx.get("file_id"),
                 page_id=canvas_ctx.get("page_id"),
+                user_id=active_user.get("id"),
+                user_email=active_user.get("email"),
+                user_fullname=active_user.get("fullname"),
+                vision_summary={
+                    "pgvector_active": vision_ctx.get("pgvector_active", False),
+                    "total_shapes": vision_ctx.get("total_shapes", 0),
+                    "recommended_free_origin": vision_ctx.get("recommended_free_origin"),
+                    "top_matches": (vision_ctx.get("matched_shapes") or [])[:4],
+                },
                 created_shapes=created_shapes,
                 tool_trace=tool_trace,
                 latency_ms=latency,
@@ -2288,9 +2509,15 @@ class PenpotAgentGateway:
             if addendum_text
             else ""
         )
+        eye_block = str(vision_ctx.get("prompt_eye_summary") or "")
+        rec_xy = vision_ctx.get("recommended_free_origin") or {"x": 80.0, "y": 80.0}
         system_prompt = (
             "You are Penpot AI Studio, an expert UI/UX design agent embedded inside Penpot via the "
             "Penpot MCP Hybrid Gateway and SDK Agent Pipeline.\n"
+            f"Authenticated Penpot Designer:\n"
+            f"- user_id: {active_user.get('id')}\n"
+            f"- fullname: {active_user.get('fullname')}\n"
+            f"- email: {active_user.get('email')}\n\n"
             f"Active Canvas Context:\n"
             f"- file_id: {canvas_ctx.get('file_id')}\n"
             f"- file_name: {canvas_ctx.get('file_name')}\n"
@@ -2298,10 +2525,13 @@ class PenpotAgentGateway:
             f"- page_name: {canvas_ctx.get('page_name')}\n"
             f"- selected_shape_ids: {json.dumps(canvas_ctx.get('selected_shape_ids', []))}\n"
             f"- selection_details: {json.dumps(canvas_ctx.get('selection', [])[:10])}\n\n"
+            f"=== PGVECTOR SEMANTIC & SPATIAL CANVAS VISION EYE ===\n"
+            f"{eye_block}\n"
+            f"=====================================================\n\n"
             "Rules:\n"
             "1. When the user asks to create a card, hero section, login form, pricing card, navbar, or UI layout, "
-            "call `create_ui_artifact` or `run_penpot_batch` immediately to materialize it on the active page.\n"
-            "2. When modifying selected shapes, inspecting CSS/SVG, or binding tokens, call `call_penpot_branch_tool`.\n"
+            f"call `create_ui_artifact` or `run_penpot_batch` immediately (using free coordinates x={rec_xy.get('x', 80)}, y={rec_xy.get('y', 80)} so you do not overlap existing frames).\n"
+            "2. You CAN see the canvas via the PGVECTOR SEMANTIC & SPATIAL CANVAS VISION EYE above! When the user asks what is on the canvas or refers to a specific shape/color/text, use the exact shape_id, coordinates, colors, and texts from the Vision Eye (or call `query_canvas_vision_pgvector` / `call_penpot_branch_tool`).\n"
             "3. Keep your final response concise and in the user's language (Spanish or English)."
             f"{addendum_block}"
         )
@@ -2401,6 +2631,15 @@ class PenpotAgentGateway:
             tier_used=used_route.tier if used_route else "deterministic",
             file_id=canvas_ctx.get("file_id"),
             page_id=canvas_ctx.get("page_id"),
+            user_id=active_user.get("id"),
+            user_email=active_user.get("email"),
+            user_fullname=active_user.get("fullname"),
+            vision_summary={
+                "pgvector_active": vision_ctx.get("pgvector_active", False),
+                "total_shapes": vision_ctx.get("total_shapes", 0),
+                "recommended_free_origin": vision_ctx.get("recommended_free_origin"),
+                "top_matches": (vision_ctx.get("matched_shapes") or [])[:4],
+            },
             created_shapes=created_shapes,
             tool_trace=tool_trace,
             fallback_reasons=fallback_reasons,

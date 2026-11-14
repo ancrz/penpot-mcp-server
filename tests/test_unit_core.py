@@ -816,7 +816,7 @@ async def test_sdk_agent_pipeline_gateway_translators_failover_and_chat(
     assert len(chat_data["created_shapes"]) == 6
     assert chat_data["tool_trace"][0]["tool"] == "playbook_run"
 
-    status_req = SimpleNamespace(method="GET")
+    status_req = SimpleNamespace(method="GET", query_params={})
     monkeypatch.setattr(
         agw,
         "resolve_target_canvas",
@@ -921,9 +921,146 @@ async def test_vanguard_ai_gateway_config_profiles_and_write_only_keys() -> None
     assert "8px spacing grid" in inst_data["agent_instructions"]["addendum"]
     assert inst_data["agent_instructions"]["version"] >= 2
 
-    cfg_req = SimpleNamespace(method="GET")
+    cfg_req = SimpleNamespace(method="GET", query_params={})
     cfg_resp = await agent_config_route(cfg_req)
     cfg_data = json.loads(cfg_resp.body.decode("utf-8"))
     assert cfg_data["status"] == "ok"
     assert len(cfg_data["providers_catalog"]) >= 6
+
+
+@pytest.mark.asyncio
+async def test_multiuser_penpot_profiles_and_pgvector_vision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify multi-user Penpot profile isolation and pgvector 64-D semantic/spatial canvas vision."""
+    from penpot_mcp.agent_gateway import PenpotAgentGateway
+    from penpot_mcp.server import agent_users_route, agent_vision_route
+    from penpot_mcp.services.vision import (
+        EMBEDDING_DIM,
+        compute_query_embedding,
+        compute_shape_embedding,
+        sync_and_query_canvas_vision,
+    )
+
+    # 1. Verify 64-D pgvector embedding cosine similarity for semantic + spatial + color matching
+    cta_shape = {
+        "id": "11111111-1111-1111-1111-111111111111",
+        "type": "rect",
+        "name": "CTA Button BG",
+        "x": 112.0,
+        "y": 200.0,
+        "width": 200.0,
+        "height": 48.0,
+        "fill_color": "#6366F1",
+    }
+    footer_shape = {
+        "id": "22222222-2222-2222-2222-222222222222",
+        "type": "text",
+        "name": "Legal Copyright",
+        "x": 80.0,
+        "y": 980.0,
+        "width": 300.0,
+        "height": 20.0,
+        "text": "2026 All rights reserved",
+        "fill_color": "#94A3B8",
+    }
+    emb_cta = compute_shape_embedding(cta_shape, frame_name="Hero Card")
+    emb_footer = compute_shape_embedding(footer_shape, frame_name="Footer")
+    assert len(emb_cta) == EMBEDDING_DIM
+    assert len(emb_footer) == EMBEDDING_DIM
+
+    q_purple_btn = compute_query_embedding("botón morado CTA button indigo")
+    sim_cta = sum(a * b for a, b in zip(q_purple_btn, emb_cta))
+    sim_footer = sum(a * b for a, b in zip(q_purple_btn, emb_footer))
+    assert sim_cta > sim_footer
+
+    # 2. Verify sync_and_query_canvas_vision calculates collision-free coordinates and ranks shapes
+    monkeypatch.setattr(
+        "penpot_mcp.gateway.gateway.execute_intent",
+        AsyncMock(
+            return_value={
+                "objects": [
+                    {
+                        "id": "33333333-3333-3333-3333-333333333333",
+                        "type": "frame",
+                        "name": "Hero Card Container",
+                        "x": 80.0,
+                        "y": 80.0,
+                        "width": 480.0,
+                        "height": 280.0,
+                        "fill_color": "#0F172A",
+                    },
+                    cta_shape,
+                    footer_shape,
+                ]
+            }
+        ),
+    )
+    vis = await sync_and_query_canvas_vision(
+        file_id="489ea7e2-71ad-8196-8008-f138042a1390",
+        page_id="489ea7e2-71ad-8196-8008-f138042a1391",
+        query_text="botón morado CTA",
+        top_k=5,
+    )
+    assert vis["enabled"] is True
+    assert vis["total_shapes"] == 3
+    assert vis["recommended_free_origin"]["x"] == 620.0  # 80 + 480 + 60 padding
+    assert vis["matched_shapes"][0]["shape_name"] == "CTA Button BG"
+    assert "Canvas Vision Eye" in vis["prompt_eye_summary"]
+
+    # 3. Verify multi-user Penpot profile switching & isolation
+    agw = PenpotAgentGateway()
+    await agw.switch_or_resolve_user(user_id="user-anthony", email="anthony_cruz@outlook.com")
+    agw.upsert_credential(
+        name="anthony-claude",
+        provider="anthropic",
+        api_key="sk-ant-anthony-9999",
+        model="claude-sonnet-4-5",
+        activate=True,
+    )
+    assert agw.active_profile["account"] == "anthony-claude"
+
+    # Switch to a second designer on the team and verify they can have their own active model
+    await agw.switch_or_resolve_user(user_id="user-maria", email="maria.design@penpot.local")
+    agw.upsert_credential(
+        name="maria-gpt4o",
+        provider="openai",
+        api_key="sk-proj-maria-7777",
+        model="gpt-4o",
+        activate=True,
+    )
+    assert agw.active_profile["account"] == "maria-gpt4o"
+    assert agw.active_profile["model"] == "gpt-4o"
+
+    # Switch back to Anthony and confirm his Claude profile is preserved in user_profiles_cache
+    assert agw.user_profiles_cache["user-anthony"]["active_profile"]["account"] == "anthony-claude"
+    assert agw.user_profiles_cache["user-maria"]["active_profile"]["account"] == "maria-gpt4o"
+
+    # 4. Verify /agent/users and /agent/vision Starlette routes
+    u_req = SimpleNamespace(
+        method="POST",
+        query_params={},
+        json=AsyncMock(return_value={"user_id": "user-anthony", "email": "anthony_cruz@outlook.com"}),
+    )
+    u_resp = await agent_users_route(u_req)
+    u_data = json.loads(u_resp.body.decode("utf-8"))
+    assert u_data["status"] == "ok"
+    assert u_data["active_user"]["email"] == "anthony_cruz@outlook.com"
+
+    v_req = SimpleNamespace(
+        method="POST",
+        query_params={},
+        json=AsyncMock(
+            return_value={
+                "file_id": "489ea7e2-71ad-8196-8008-f138042a1390",
+                "page_id": "489ea7e2-71ad-8196-8008-f138042a1391",
+                "query": "Hero Card Container",
+            }
+        ),
+    )
+    v_resp = await agent_vision_route(v_req)
+    v_data = json.loads(v_resp.body.decode("utf-8"))
+    assert v_data["enabled"] is True
+    assert v_data["total_shapes"] == 3
+
 

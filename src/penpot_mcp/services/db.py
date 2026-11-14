@@ -34,6 +34,62 @@ class PenpotDB:
             min_size=2,
             max_size=10,
         )
+        await self.ensure_mcp_extensions_and_tables()
+
+    async def ensure_mcp_extensions_and_tables(self) -> None:
+        """Auto-initialize pgvector, pg_trgm, multi-user AI profile table, and canvas vision index."""
+        if not self._pool:
+            return
+        try:
+            async with self.acquire() as conn:
+                await conn.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+                await conn.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm;")
+                await conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS public.mcp_user_ai_profile (
+                        profile_id UUID PRIMARY KEY REFERENCES public.profile(id) ON DELETE CASCADE,
+                        email TEXT NOT NULL DEFAULT '',
+                        fullname TEXT NOT NULL DEFAULT '',
+                        active_profile JSONB NOT NULL DEFAULT '{}'::jsonb,
+                        credentials JSONB NOT NULL DEFAULT '{}'::jsonb,
+                        agent_instructions JSONB NOT NULL DEFAULT '{}'::jsonb,
+                        last_file_id UUID,
+                        last_page_id UUID,
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+                    );
+                    """
+                )
+                await conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS public.mcp_canvas_vision_index (
+                        file_id UUID NOT NULL,
+                        page_id UUID NOT NULL,
+                        shape_id UUID NOT NULL,
+                        shape_name TEXT NOT NULL DEFAULT '',
+                        shape_type TEXT NOT NULL DEFAULT 'rect',
+                        parent_id UUID,
+                        frame_name TEXT NOT NULL DEFAULT '',
+                        x DOUBLE PRECISION NOT NULL DEFAULT 0,
+                        y DOUBLE PRECISION NOT NULL DEFAULT 0,
+                        width DOUBLE PRECISION NOT NULL DEFAULT 0,
+                        height DOUBLE PRECISION NOT NULL DEFAULT 0,
+                        fill_color TEXT NOT NULL DEFAULT '',
+                        text_content TEXT NOT NULL DEFAULT '',
+                        semantic_summary TEXT NOT NULL DEFAULT '',
+                        embedding vector(64),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+                        PRIMARY KEY (file_id, page_id, shape_id)
+                    );
+                    """
+                )
+                await conn.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS mcp_canvas_vision_hnsw_idx
+                        ON public.mcp_canvas_vision_index USING hnsw (embedding vector_cosine_ops);
+                    """
+                )
+        except Exception as exc:
+            logger.debug("Optional MCP pgvector/multi-user table init notice: %s", exc)
 
     async def close(self) -> None:
         if self._pool:
@@ -268,6 +324,367 @@ class PenpotDB:
             """,
             team_id,
         )
+
+    # ── Penpot Multi-User Sessions & Per-User AI Profiles ────
+
+    async def list_penpot_users(self, file_id: str | None = None) -> list[dict]:
+        """List authenticated/active Penpot users from public.profile with session & presence status."""
+        if not self._pool:
+            return []
+        rows = await self.fetch(
+            """
+            SELECT p.id::text AS id,
+                   p.fullname,
+                   p.email,
+                   COALESCE(p.lang, 'es') AS lang,
+                   COALESCE(p.theme, 'default') AS theme,
+                   p.is_active,
+                   p.default_team_id::text AS default_team_id,
+                   p.default_project_id::text AS default_project_id,
+                   p.created_at,
+                   (SELECT COUNT(*) FROM http_session_v2 s WHERE s.profile_id = p.id) AS active_sessions,
+                   (SELECT MAX(s.modified_at) FROM http_session_v2 s WHERE s.profile_id = p.id) AS last_session_at,
+                   (SELECT COUNT(*) FROM presence pr WHERE pr.profile_id = p.id) AS active_presence_count,
+                   EXISTS(SELECT 1 FROM public.mcp_user_ai_profile uai WHERE uai.profile_id = p.id) AS has_ai_profile
+            FROM public.profile p
+            WHERE p.deleted_at IS NULL AND p.is_blocked IS NOT TRUE
+            ORDER BY last_session_at DESC NULLS LAST, p.created_at ASC
+            """
+        )
+        return rows
+
+    async def resolve_authenticated_penpot_user(
+        self,
+        *,
+        user_id: str | None = None,
+        email: str | None = None,
+        session_id: str | None = None,
+        file_id: str | None = None,
+    ) -> dict | None:
+        """Resolve a Penpot user by explicit user_id/email, session_id in http_session_v2, presence on file_id, or latest session."""
+        if not self._pool:
+            return None
+
+        if session_id:
+            try:
+                row = await self.fetchrow(
+                    """
+                    SELECT p.id::text AS id, p.fullname, p.email, COALESCE(p.lang, 'es') AS lang,
+                           COALESCE(p.theme, 'default') AS theme, p.default_team_id::text AS default_team_id,
+                           p.default_project_id::text AS default_project_id,
+                           'http_session_v2' AS resolved_via
+                    FROM public.http_session_v2 s
+                    JOIN public.profile p ON p.id = s.profile_id
+                    WHERE s.id::text = $1 AND p.deleted_at IS NULL
+                    LIMIT 1
+                    """,
+                    session_id.strip(),
+                )
+                if row:
+                    return row
+            except Exception:
+                pass
+
+        if user_id:
+            try:
+                row = await self.fetchrow(
+                    """
+                    SELECT p.id::text AS id, p.fullname, p.email, COALESCE(p.lang, 'es') AS lang,
+                           COALESCE(p.theme, 'default') AS theme, p.default_team_id::text AS default_team_id,
+                           p.default_project_id::text AS default_project_id,
+                           'profile_id' AS resolved_via
+                    FROM public.profile p
+                    WHERE p.id::text = $1 AND p.deleted_at IS NULL
+                    LIMIT 1
+                    """,
+                    user_id.strip(),
+                )
+                if row:
+                    return row
+            except Exception:
+                pass
+
+        if email:
+            try:
+                row = await self.fetchrow(
+                    """
+                    SELECT p.id::text AS id, p.fullname, p.email, COALESCE(p.lang, 'es') AS lang,
+                           COALESCE(p.theme, 'default') AS theme, p.default_team_id::text AS default_team_id,
+                           p.default_project_id::text AS default_project_id,
+                           'email' AS resolved_via
+                    FROM public.profile p
+                    WHERE LOWER(p.email) = LOWER($1) AND p.deleted_at IS NULL
+                    LIMIT 1
+                    """,
+                    email.strip(),
+                )
+                if row:
+                    return row
+            except Exception:
+                pass
+
+        if file_id:
+            try:
+                row = await self.fetchrow(
+                    """
+                    SELECT p.id::text AS id, p.fullname, p.email, COALESCE(p.lang, 'es') AS lang,
+                           COALESCE(p.theme, 'default') AS theme, p.default_team_id::text AS default_team_id,
+                           p.default_project_id::text AS default_project_id,
+                           'canvas_presence' AS resolved_via
+                    FROM public.presence pr
+                    JOIN public.profile p ON p.id = pr.profile_id
+                    WHERE pr.file_id::text = $1 AND p.deleted_at IS NULL
+                    ORDER BY pr.updated_at DESC
+                    LIMIT 1
+                    """,
+                    file_id.strip(),
+                )
+                if row:
+                    return row
+            except Exception:
+                pass
+
+        try:
+            row = await self.fetchrow(
+                """
+                SELECT p.id::text AS id, p.fullname, p.email, COALESCE(p.lang, 'es') AS lang,
+                       COALESCE(p.theme, 'default') AS theme, p.default_team_id::text AS default_team_id,
+                       p.default_project_id::text AS default_project_id,
+                       'latest_session' AS resolved_via
+                FROM public.profile p
+                LEFT JOIN public.http_session_v2 s ON s.profile_id = p.id
+                WHERE p.deleted_at IS NULL AND p.is_active IS TRUE
+                ORDER BY s.modified_at DESC NULLS LAST, p.created_at ASC
+                LIMIT 1
+                """
+            )
+            return row
+        except Exception:
+            return None
+
+    async def get_user_ai_state(self, profile_id: str) -> dict | None:
+        """Load per-user AI profile, credentials, and instructions from public.mcp_user_ai_profile."""
+        if not self._pool or not profile_id:
+            return None
+        try:
+            row = await self.fetchrow(
+                """
+                SELECT profile_id::text AS profile_id,
+                       email,
+                       fullname,
+                       active_profile,
+                       credentials,
+                       agent_instructions,
+                       last_file_id::text AS last_file_id,
+                       last_page_id::text AS last_page_id,
+                       updated_at
+                FROM public.mcp_user_ai_profile
+                WHERE profile_id::text = $1
+                """,
+                profile_id.strip(),
+            )
+            if not row:
+                return None
+            import json as _json
+
+            for json_col in ("active_profile", "credentials", "agent_instructions"):
+                val = row.get(json_col)
+                if isinstance(val, str):
+                    try:
+                        row[json_col] = _json.loads(val)
+                    except Exception:
+                        row[json_col] = {}
+            return row
+        except Exception as exc:
+            logger.debug("get_user_ai_state warning: %s", exc)
+            return None
+
+    async def save_user_ai_state(
+        self,
+        *,
+        profile_id: str,
+        email: str,
+        fullname: str,
+        active_profile: dict,
+        credentials: dict,
+        agent_instructions: dict,
+        last_file_id: str | None = None,
+        last_page_id: str | None = None,
+    ) -> bool:
+        """Persist per-user AI profile, credentials, and instructions into public.mcp_user_ai_profile."""
+        if not self._pool or not profile_id:
+            return False
+        import json as _json
+        import uuid as _uuid
+
+        try:
+            uid = _uuid.UUID(str(profile_id).strip())
+            fid = _uuid.UUID(str(last_file_id).strip()) if last_file_id else None
+            pid = _uuid.UUID(str(last_page_id).strip()) if last_page_id else None
+            async with self.acquire() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO public.mcp_user_ai_profile (
+                        profile_id, email, fullname, active_profile, credentials,
+                        agent_instructions, last_file_id, last_page_id, updated_at
+                    )
+                    VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7, $8, clock_timestamp())
+                    ON CONFLICT (profile_id) DO UPDATE SET
+                        email = EXCLUDED.email,
+                        fullname = EXCLUDED.fullname,
+                        active_profile = EXCLUDED.active_profile,
+                        credentials = EXCLUDED.credentials,
+                        agent_instructions = EXCLUDED.agent_instructions,
+                        last_file_id = COALESCE(EXCLUDED.last_file_id, public.mcp_user_ai_profile.last_file_id),
+                        last_page_id = COALESCE(EXCLUDED.last_page_id, public.mcp_user_ai_profile.last_page_id),
+                        updated_at = clock_timestamp()
+                    """,
+                    uid,
+                    email or "",
+                    fullname or "",
+                    _json.dumps(active_profile or {}),
+                    _json.dumps(credentials or {}),
+                    _json.dumps(agent_instructions or {}),
+                    fid,
+                    pid,
+                )
+            return True
+        except Exception as exc:
+            logger.debug("save_user_ai_state warning: %s", exc)
+            return False
+
+    # ── pgvector Canvas Vision Index ─────────────────────────
+
+    async def get_pgvector_status(self) -> dict[str, Any]:
+        """Return installed PostgreSQL version, pgvector/pg_trgm versions, and indexed shape count."""
+        if not self._pool:
+            return {"connected": False, "pgvector_installed": False}
+        try:
+            ext_rows = await self.fetch(
+                "SELECT extname, extversion FROM pg_extension WHERE extname IN ('vector', 'pg_trgm') ORDER BY extname"
+            )
+            exts = {r["extname"]: r["extversion"] for r in ext_rows}
+            indexed_count = await self.fetchval("SELECT COUNT(*) FROM public.mcp_canvas_vision_index")
+            users_with_ai = await self.fetchval("SELECT COUNT(*) FROM public.mcp_user_ai_profile")
+            return {
+                "connected": True,
+                "pgvector_installed": "vector" in exts,
+                "pgvector_version": exts.get("vector"),
+                "pg_trgm_version": exts.get("pg_trgm"),
+                "indexed_shapes_count": int(indexed_count or 0),
+                "users_with_ai_profiles": int(users_with_ai or 0),
+            }
+        except Exception as exc:
+            return {"connected": True, "pgvector_installed": False, "error": str(exc)}
+
+    async def index_page_vision_rows(
+        self, file_id: str, page_id: str, rows: list[dict[str, Any]]
+    ) -> int:
+        """Synchronize live page shapes into public.mcp_canvas_vision_index with vector(64) embeddings."""
+        if not self._pool:
+            return 0
+        import uuid as _uuid
+
+        fid = _uuid.UUID(str(file_id).strip())
+        pid = _uuid.UUID(str(page_id).strip())
+        async with self.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute(
+                    "DELETE FROM public.mcp_canvas_vision_index WHERE file_id = $1 AND page_id = $2",
+                    fid,
+                    pid,
+                )
+                for r in rows:
+                    try:
+                        sid = _uuid.UUID(str(r["shape_id"]).strip())
+                    except Exception:
+                        continue
+                    parent_uuid = None
+                    if r.get("parent_id"):
+                        try:
+                            parent_uuid = _uuid.UUID(str(r["parent_id"]).strip())
+                        except Exception:
+                            parent_uuid = None
+                    await conn.execute(
+                        """
+                        INSERT INTO public.mcp_canvas_vision_index (
+                            file_id, page_id, shape_id, shape_name, shape_type,
+                            parent_id, frame_name, x, y, width, height,
+                            fill_color, text_content, semantic_summary, embedding, updated_at
+                        )
+                        VALUES (
+                            $1, $2, $3, $4, $5,
+                            $6, $7, $8, $9, $10, $11,
+                            $12, $13, $14, $15::vector(64), clock_timestamp()
+                        )
+                        """,
+                        fid,
+                        pid,
+                        sid,
+                        str(r.get("shape_name") or ""),
+                        str(r.get("shape_type") or "rect"),
+                        parent_uuid,
+                        str(r.get("frame_name") or ""),
+                        float(r.get("x") or 0.0),
+                        float(r.get("y") or 0.0),
+                        float(r.get("width") or 0.0),
+                        float(r.get("height") or 0.0),
+                        str(r.get("fill_color") or ""),
+                        str(r.get("text_content") or ""),
+                        str(r.get("semantic_summary") or ""),
+                        str(r.get("embedding")),
+                    )
+        return len(rows)
+
+    async def search_page_vision_pgvector(
+        self,
+        *,
+        file_id: str,
+        page_id: str,
+        query_vector_literal: str,
+        query_text: str = "",
+        top_k: int = 10,
+    ) -> list[dict[str, Any]]:
+        """Query public.mcp_canvas_vision_index using pgvector cosine distance (<=>) + pg_trgm similarity."""
+        if not self._pool:
+            return []
+        import uuid as _uuid
+
+        fid = _uuid.UUID(str(file_id).strip())
+        pid = _uuid.UUID(str(page_id).strip())
+        clean_q = (query_text or "").strip()
+        rows = await self.fetch(
+            """
+            SELECT shape_id::text AS shape_id,
+                   shape_name,
+                   shape_type,
+                   frame_name,
+                   ROUND(x::numeric, 1)::float AS x,
+                   ROUND(y::numeric, 1)::float AS y,
+                   ROUND(width::numeric, 1)::float AS width,
+                   ROUND(height::numeric, 1)::float AS height,
+                   fill_color,
+                   text_content,
+                   semantic_summary,
+                   ROUND(
+                       (
+                           (1.0 - (embedding <=> $3::vector(64))) * 0.78
+                           + COALESCE(similarity(semantic_summary, $4), 0.0) * 0.22
+                       )::numeric,
+                       4
+                   )::float AS similarity
+            FROM public.mcp_canvas_vision_index
+            WHERE file_id = $1 AND page_id = $2
+            ORDER BY similarity DESC, y ASC, x ASC
+            LIMIT $5
+            """,
+            fid,
+            pid,
+            query_vector_literal,
+            clean_q,
+            max(1, int(top_k)),
+        )
+        return rows
 
 
 # Singleton

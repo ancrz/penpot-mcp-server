@@ -528,12 +528,13 @@
     </div>
     <div class="context-bar">
       <div class="ctx-badges">
+        <span id="user-tag" class="ctx-tag" title="Usuario autenticado en Penpot">👤 Anthony Cruz</span>
         <span id="model-tag" class="ctx-tag">gemini-3.5-flash-lite</span>
+        <span id="vision-tag" class="ctx-tag" title="pgvector Semantic & Spatial Canvas Eye">👁️ pgvector</span>
         <span id="canvas-tag" class="ctx-tag">Canvas: Auto</span>
-        <span id="selection-tag" class="ctx-tag">0 selected</span>
       </div>
       <div class="header-actions">
-        <button id="config-btn" class="cfg-btn" type="button" title="Configurar Gateway, Agentes y API Keys">⚙️ Config</button>
+        <button id="config-btn" class="cfg-btn" type="button" title="Configurar Gateway, Agentes, Usuarios y pgvector">⚙️ Config</button>
         <button id="sync-btn" class="sync-btn" type="button" title="Refresh Canvas & Gateway Status">Sync</button>
       </div>
     </div>
@@ -544,15 +545,16 @@
     <div class="cfg-header">
       <div class="cfg-title">
         <span>⚙️ AI Gateway & Agentes</span>
-        <span class="ctx-tag">Vanguard Control Module</span>
+        <span class="ctx-tag">Vanguard Control + pgvector</span>
       </div>
       <button id="cfg-close-btn" class="cfg-close" type="button">✕ Volver al Chat</button>
     </div>
 
     <div class="cfg-tabs" role="tablist">
       <button class="cfg-tab active" data-tab="tab-routing" type="button">1. Agente / Perfil</button>
-      <button class="cfg-tab" data-tab="tab-providers" type="button">2. API Keys / Proveedores</button>
-      <button class="cfg-tab" data-tab="tab-instructions" type="button">3. Instrucciones & Invocación</button>
+      <button class="cfg-tab" data-tab="tab-providers" type="button">2. API Keys</button>
+      <button class="cfg-tab" data-tab="tab-users-vision" type="button">3. Usuarios & pgvector</button>
+      <button class="cfg-tab" data-tab="tab-instructions" type="button">4. Instrucciones</button>
     </div>
 
     <div class="cfg-body">
@@ -686,7 +688,39 @@
         </div>
       </div>
 
-      <!-- TAB 3: Agent Instructions Addendum & Penpot Invocation -->
+      <!-- TAB 3: Penpot Multi-User Sessions & pgvector Canvas Vision Eye -->
+      <div id="tab-users-vision" class="cfg-pane">
+        <div class="cfg-card">
+          <h4>
+            <span>👥 Usuarios Autenticados en Penpot (public.profile)</span>
+            <span id="active-user-badge" class="ctx-tag">Anthony Cruz</span>
+          </h4>
+          <div style="font-size:11px; color:var(--text-1);">
+            Cada usuario de Penpot mantiene su propio perfil de IA, modelo activo y API Keys aisladas en <code>public.mcp_user_ai_profile</code> sin interrumpir a otros diseñadores.
+          </div>
+          <div id="penpot-users-list" style="display:flex; flex-direction:column; gap:6px;"></div>
+        </div>
+
+        <div class="cfg-card">
+          <h4>
+            <span>👁️ Ojos Semánticos & Espaciales de la IA (pgvector)</span>
+            <span id="pgvector-ver-badge" class="ctx-tag">pgvector 0.8.7</span>
+          </h4>
+          <div style="font-size:11px; color:var(--text-1);">
+            Indexa en tiempo real los elementos del lienzo en <code>public.mcp_canvas_vision_index</code> usando vectores <code>vector(64)</code> HNSW + <code>pg_trgm</code> para que cualquier IA del Gateway vea colores, textos, jerarquía y coordenadas libres.
+          </div>
+          <div class="field">
+            <label for="vision-query-input">Consulta Semántica / Espacial sobre el Lienzo Activo</label>
+            <div class="btn-row" style="width:100%;">
+              <input id="vision-query-input" type="text" style="flex:1;" value="hero card title purple button" placeholder="ej. botón morado CTA, título principal, login..." />
+              <button id="run-vision-btn" class="btn-primary" type="button">🔍 Escanear con pgvector</button>
+            </div>
+          </div>
+          <div id="vision-results-box" class="code-snippet" style="max-height:190px; overflow-y:auto; white-space:pre-wrap;">Cargando índice espacial pgvector...</div>
+        </div>
+      </div>
+
+      <!-- TAB 4: Agent Instructions Addendum & Penpot Invocation -->
       <div id="tab-instructions" class="cfg-pane">
         <div class="cfg-card">
           <h4>
@@ -724,6 +758,7 @@
   </div>
 
   <div class="quick-strip" role="toolbar" aria-label="Quick AI Actions">
+    <button class="quick-chip" data-action="vision_scan" data-prompt="¿Qué ves actualmente en el lienzo de Penpot según pgvector?">👁️ Ojos pgvector</button>
     <button class="quick-chip" data-action="hero_card" data-prompt="Create a Hero Card component on the active page">+ Hero Card</button>
     <button class="quick-chip" data-action="login_form" data-prompt="Create a modern SSO Login Form card">+ Login Form</button>
     <button class="quick-chip" data-action="pricing_card" data-prompt="Create an Enterprise AI Pricing Card">+ Pricing Card</button>
@@ -735,11 +770,11 @@
   <div id="chat-feed" class="feed" role="log" aria-live="polite">
     <div class="msg assistant">
       <div class="msg-meta">
-        <span>SDK Agent Pipeline · Hybrid Gateway</span>
-        <span>v0.4.0</span>
+        <span>SDK Agent Pipeline · Hybrid Gateway + pgvector</span>
+        <span>v0.5.0</span>
       </div>
       <div>
-        Conectado al servidor <strong>Penpot MCP</strong> (14 sub-tools + <code>playbook_run</code> Code Mode). Usa <strong>⚙️ Config</strong> para cambiar entre <strong>Gemini, Claude, ChatGPT u Ollama</strong> o reemplazar tus API keys.
+        Conectado al servidor <strong>Penpot MCP</strong> (14 sub-tools + <code>pgvector 0.8.7</code> Canvas Vision + Perfiles Multi-Usuario). Usa <strong>⚙️ Config</strong> para cambiar de agente, gestionar tus API keys por usuario o inspeccionar los <strong>👁️ Ojos pgvector</strong>.
       </div>
     </div>
   </div>
@@ -758,9 +793,10 @@
   <script>
     const connPill = document.getElementById("conn-pill");
     const connText = document.getElementById("conn-text");
+    const userTag = document.getElementById("user-tag");
     const modelTag = document.getElementById("model-tag");
+    const visionTag = document.getElementById("vision-tag");
     const canvasTag = document.getElementById("canvas-tag");
-    const selectionTag = document.getElementById("selection-tag");
     const syncBtn = document.getElementById("sync-btn");
     const configBtn = document.getElementById("config-btn");
     const configDrawer = document.getElementById("config-drawer");
@@ -783,6 +819,8 @@
     const urlParams = new URLSearchParams(window.location.search);
     let activeFileId = urlParams.get("file_id") || null;
     let activePageId = urlParams.get("page_id") || null;
+    let activeUserId = urlParams.get("user_id") || null;
+    let activeUserEmail = urlParams.get("user_email") || null;
     let ws = null;
     let chatHistory = [];
     let gatewayConfigCache = null;
@@ -811,12 +849,6 @@
       const fileLabel = ctx.file_name || (activeFileId ? activeFileId.slice(0, 8) : "Auto");
       const pageLabel = ctx.page_name || (activePageId ? activePageId.slice(0, 8) : "Page 1");
       canvasTag.textContent = `${fileLabel} · ${pageLabel}`;
-      const selCount = Array.isArray(ctx.ids)
-        ? ctx.ids.length
-        : Array.isArray(ctx.selected_shape_ids)
-        ? ctx.selected_shape_ids.length
-        : 0;
-      selectionTag.textContent = `${selCount} selected`;
     }
 
     async function pushHttpTelemetry(payload) {
@@ -846,9 +878,21 @@
           ids: latestPluginContext.ids || [],
           selection: latestPluginContext.selection || [],
         });
-        const res = await fetch("/agent/status");
+        const q = new URLSearchParams();
+        if (activeUserId) q.set("user_id", activeUserId);
+        if (activeUserEmail) q.set("user_email", activeUserEmail);
+        const res = await fetch("/agent/status?" + q.toString());
         if (!res.ok) throw new Error("Status check failed");
         const st = await res.json();
+        if (st.active_user) {
+          activeUserId = st.active_user.id || activeUserId;
+          activeUserEmail = st.active_user.email || activeUserEmail;
+          userTag.textContent = `👤 ${st.active_user.fullname || st.active_user.email || "Penpot User"}`;
+          userTag.title = `${st.active_user.fullname || ""} <${st.active_user.email || ""}>`;
+        }
+        if (st.pgvector && st.pgvector.pgvector_installed) {
+          visionTag.textContent = `👁️ pgvector v${st.pgvector.pgvector_version || "0.8.7"} (${st.pgvector.indexed_shapes_count || 0} shapes)`;
+        }
         const servingModel = st.default_model || (st.serving && st.serving.model) || "gemini-3.5-flash-lite";
         const activeProv = st.active_provider || (st.serving && st.serving.provider) || "gemini";
         modelTag.textContent = `${activeProv}:${servingModel}`;
@@ -863,7 +907,10 @@
 
     async function loadGatewayConfig() {
       try {
-        const res = await fetch("/agent/config");
+        const q = new URLSearchParams();
+        if (activeUserId) q.set("user_id", activeUserId);
+        if (activeUserEmail) q.set("user_email", activeUserEmail);
+        const res = await fetch("/agent/config?" + q.toString());
         if (!res.ok) return;
         const cfg = await res.json();
         gatewayConfigCache = cfg;
@@ -946,8 +993,86 @@
         const inst = cfg.agent_instructions || {};
         document.getElementById("inst-ver-badge").textContent = `v${inst.version || 1}`;
         document.getElementById("inst-addendum").value = inst.addendum || "";
+
+        // Tab 3: Penpot Multi-User Sessions & pgvector Vision
+        if (cfg.active_user) {
+          activeUserId = cfg.active_user.id || activeUserId;
+          activeUserEmail = cfg.active_user.email || activeUserEmail;
+          document.getElementById("active-user-badge").textContent = `${cfg.active_user.fullname || "User"} (${cfg.active_user.email || ""})`;
+          userTag.textContent = `👤 ${cfg.active_user.fullname || cfg.active_user.email || "Penpot User"}`;
+        }
+        if (cfg.pgvector) {
+          document.getElementById("pgvector-ver-badge").textContent = cfg.pgvector.pgvector_installed
+            ? `pgvector v${cfg.pgvector.pgvector_version} · pg_trgm v${cfg.pgvector.pg_trgm_version} (${cfg.pgvector.indexed_shapes_count || 0} shapes)`
+            : "pgvector Fallback";
+        }
+        const usersList = document.getElementById("penpot-users-list");
+        if (usersList) {
+          usersList.innerHTML = "";
+          for (const u of cfg.penpot_users || []) {
+            const isCurrent = cfg.active_user && u.id === cfg.active_user.id;
+            const uRow = document.createElement("div");
+            uRow.className = "cred-item";
+            uRow.innerHTML = `
+              <div class="cred-meta">
+                <span class="cred-name">👤 ${u.fullname || u.email} ${isCurrent ? '<span class="ctx-tag" style="border-color:#10b981;color:#6ee7b7;">Sesión Activa</span>' : ""}</span>
+                <span class="cred-sub">${u.email} · Sesiones Penpot: ${u.active_sessions || 0} · Perfil IA en BD: ${u.has_ai_profile ? "Sí" : "Auto"}</span>
+              </div>
+              <div class="btn-row">
+                <button type="button" class="${isCurrent ? "btn-secondary" : "btn-primary"} btn-switch-user" data-uid="${u.id}" data-email="${u.email}">
+                  ${isCurrent ? "✓ Conectado" : "Cambiar Usuario"}
+                </button>
+              </div>
+            `;
+            usersList.appendChild(uRow);
+          }
+          usersList.querySelectorAll(".btn-switch-user").forEach((btn) => {
+            btn.addEventListener("click", async () => {
+              activeUserId = btn.getAttribute("data-uid");
+              activeUserEmail = btn.getAttribute("data-email");
+              await fetch("/agent/users", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ user_id: activeUserId, email: activeUserEmail, file_id: activeFileId }),
+              });
+              await loadGatewayConfig();
+              await refreshGatewayStatus();
+              showToast(`Sesión IA cambiada al usuario de Penpot: ${activeUserEmail}`);
+            });
+          });
+        }
+        await runVisionScan(document.getElementById("vision-query-input").value || "hero card title button");
       } catch (_err) {}
     }
+
+    async function runVisionScan(queryStr) {
+      const box = document.getElementById("vision-results-box");
+      if (!box) return;
+      try {
+        const res = await fetch("/agent/vision", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            file_id: activeFileId,
+            page_id: activePageId,
+            query: queryStr || "hero card title button frame",
+            top_k: 8,
+          }),
+        });
+        if (!res.ok) return;
+        const vis = await res.json();
+        box.textContent = vis.prompt_eye_summary || JSON.stringify(vis, null, 2);
+        if (vis.pgvector_status && vis.pgvector_status.pgvector_installed) {
+          visionTag.textContent = `👁️ pgvector v${vis.pgvector_status.pgvector_version} (${vis.total_shapes || 0} shapes)`;
+        }
+      } catch (_e) {}
+    }
+
+    document.getElementById("run-vision-btn").addEventListener("click", async () => {
+      const q = document.getElementById("vision-query-input").value.trim();
+      await runVisionScan(q);
+      showToast("Escaneo semántico/espacial pgvector actualizado.");
+    });
 
     // Drawer open / close & tabs
     configBtn.addEventListener("click", () => {
@@ -1012,6 +1137,8 @@
     // Save Active Profile button
     document.getElementById("save-profile-btn").addEventListener("click", async () => {
       const payload = {
+        user_id: activeUserId,
+        user_email: activeUserEmail,
         account: document.getElementById("cfg-account").value,
         provider: document.getElementById("cfg-provider").value,
         model: document.getElementById("cfg-model").value.trim(),
@@ -1058,6 +1185,8 @@
     // Save / Replace Provider Key button
     document.getElementById("save-key-btn").addEventListener("click", async () => {
       const payload = {
+        user_id: activeUserId,
+        user_email: activeUserEmail,
         name: document.getElementById("prov-name").value.trim() || `${document.getElementById("prov-type").value}-main`,
         provider: document.getElementById("prov-type").value,
         api_key: document.getElementById("prov-key").value.trim(),
@@ -1230,6 +1359,8 @@
             quick_action: quickAction || null,
             file_id: activeFileId,
             page_id: activePageId,
+            user_id: activeUserId,
+            user_email: activeUserEmail,
             history: chatHistory.slice(-6),
           }),
         });

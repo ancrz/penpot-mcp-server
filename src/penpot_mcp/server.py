@@ -225,9 +225,19 @@ async def agent_status_route(request):
 
     if request.method == "OPTIONS":
         return Response(status_code=204, headers=_cors_headers())
-    status_data = agent_gateway.get_status()
+    q_uid = request.query_params.get("user_id")
+    q_email = request.query_params.get("user_email") or request.query_params.get("email")
+    q_sid = request.query_params.get("session_id")
     canvas = await agent_gateway.resolve_target_canvas()
+    await agent_gateway.switch_or_resolve_user(
+        user_id=q_uid,
+        email=q_email,
+        session_id=q_sid,
+        file_id=canvas.get("file_id"),
+    )
+    status_data = agent_gateway.get_status()
     status_data["resolved_canvas"] = canvas
+    status_data["pgvector"] = await db.get_pgvector_status()
     return JSONResponse(status_data, headers=_cors_headers())
 
 
@@ -270,6 +280,9 @@ async def agent_chat_route(request):
         prompt or quick_action or "",
         file_id=payload.get("file_id"),
         page_id=payload.get("page_id"),
+        user_id=payload.get("user_id"),
+        user_email=payload.get("user_email") or payload.get("email"),
+        session_id=payload.get("session_id"),
         quick_action=quick_action,
         history=payload.get("history") if isinstance(payload.get("history"), list) else None,
     )
@@ -295,20 +308,113 @@ async def agent_breakers_reset(request):
 
 @mcp.custom_route("/agent/config", methods=["GET", "OPTIONS"])
 async def agent_config_route(request):
-    """Return full AI Gateway configuration (presets, providers, masked keys, active profile, instructions)."""
+    """Return full AI Gateway configuration (presets, providers, masked keys, active profile, instructions, user & pgvector)."""
     from starlette.responses import Response
     from penpot_mcp.agent_gateway import agent_gateway
 
     if request.method == "OPTIONS":
         return Response(status_code=204, headers=_cors_headers())
+    q_uid = request.query_params.get("user_id")
+    q_email = request.query_params.get("user_email") or request.query_params.get("email")
+    q_sid = request.query_params.get("session_id")
+    canvas = await agent_gateway.resolve_target_canvas()
+    await agent_gateway.switch_or_resolve_user(
+        user_id=q_uid,
+        email=q_email,
+        session_id=q_sid,
+        file_id=canvas.get("file_id"),
+    )
     cfg = agent_gateway.get_config()
-    cfg["resolved_canvas"] = await agent_gateway.resolve_target_canvas()
-    return JSONResponse(cfg, headers=_cors_headers())
+    cfg["resolved_canvas"] = canvas
+    cfg["penpot_users"] = await db.list_penpot_users(canvas.get("file_id"))
+    cfg["pgvector"] = await db.get_pgvector_status()
+    return JSONResponse(json.loads(json.dumps(cfg, default=str)), headers=_cors_headers())
+
+
+@mcp.custom_route("/agent/users", methods=["GET", "POST", "OPTIONS"])
+async def agent_users_route(request):
+    """List Penpot users from public.profile or switch the active authenticated user session."""
+    from starlette.responses import Response
+    from penpot_mcp.agent_gateway import agent_gateway
+
+    if request.method == "OPTIONS":
+        return Response(status_code=204, headers=_cors_headers())
+
+    canvas = await agent_gateway.resolve_target_canvas()
+    if request.method == "POST":
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        active_u = await agent_gateway.switch_or_resolve_user(
+            user_id=payload.get("user_id"),
+            email=payload.get("email") or payload.get("user_email"),
+            session_id=payload.get("session_id"),
+            file_id=payload.get("file_id") or canvas.get("file_id"),
+        )
+    else:
+        active_u = await agent_gateway.switch_or_resolve_user(
+            user_id=request.query_params.get("user_id"),
+            email=request.query_params.get("email") or request.query_params.get("user_email"),
+            session_id=request.query_params.get("session_id"),
+            file_id=canvas.get("file_id"),
+        )
+
+    users = await db.list_penpot_users(canvas.get("file_id"))
+    out = {
+        "status": "ok",
+        "active_user": active_u,
+        "users": users,
+        "active_profile": agent_gateway.active_profile,
+        "credentials": agent_gateway.list_catalog(),
+    }
+    return JSONResponse(json.loads(json.dumps(out, default=str)), headers=_cors_headers())
+
+
+@mcp.custom_route("/agent/vision", methods=["GET", "POST", "OPTIONS"])
+async def agent_vision_route(request):
+    """Sync live Penpot canvas objects into PostgreSQL pgvector and query the semantic + spatial scene graph."""
+    from starlette.responses import Response
+    from penpot_mcp.agent_gateway import agent_gateway
+    from penpot_mcp.services.vision import sync_and_query_canvas_vision
+
+    if request.method == "OPTIONS":
+        return Response(status_code=204, headers=_cors_headers())
+
+    payload: dict[str, Any] = {}
+    if request.method == "POST":
+        try:
+            body = await request.json()
+            if isinstance(body, dict):
+                payload = body
+        except Exception:
+            payload = {}
+
+    q_file = payload.get("file_id") or request.query_params.get("file_id")
+    q_page = payload.get("page_id") or request.query_params.get("page_id")
+    q_text = str(
+        payload.get("query")
+        or request.query_params.get("query")
+        or "hero card title button frame"
+    )
+    top_k = int(payload.get("top_k") or request.query_params.get("top_k") or 10)
+
+    canvas = await agent_gateway.resolve_target_canvas(file_id=q_file, page_id=q_page)
+    vis = await sync_and_query_canvas_vision(
+        file_id=canvas.get("file_id"),
+        page_id=canvas.get("page_id"),
+        query_text=q_text,
+        top_k=top_k,
+    )
+    vis["pgvector_status"] = await db.get_pgvector_status()
+    return JSONResponse(json.loads(json.dumps(vis, default=str)), headers=_cors_headers())
 
 
 @mcp.custom_route("/agent/providers", methods=["POST", "PUT", "DELETE", "OPTIONS"])
 async def agent_providers_route(request):
-    """Create, replace (write-only API key), or delete a provider credential profile."""
+    """Create, replace (write-only API key), or delete a provider credential profile (per Penpot user)."""
     from starlette.responses import Response
     from penpot_mcp.agent_gateway import agent_gateway
 
@@ -325,10 +431,17 @@ async def agent_providers_route(request):
             headers=_cors_headers(),
         )
 
+    if payload.get("user_id") or payload.get("user_email"):
+        await agent_gateway.switch_or_resolve_user(
+            user_id=payload.get("user_id"),
+            email=payload.get("user_email"),
+        )
+
     if request.method == "DELETE" or payload.get("action") == "delete":
         name = str(payload.get("name") or request.query_params.get("name") or "").strip()
         try:
             res = agent_gateway.delete_credential(name)
+            await agent_gateway.sync_active_user_to_db()
             return JSONResponse(res, headers=_cors_headers())
         except KeyError as exc:
             return JSONResponse(
@@ -349,9 +462,11 @@ async def agent_providers_route(request):
             model=payload.get("model"),
             activate=bool(payload.get("activate", True)),
         )
+        await agent_gateway.sync_active_user_to_db()
         return JSONResponse(
             {
                 "status": "ok",
+                "active_user": agent_gateway.active_user,
                 "credential": entry,
                 "active_profile": agent_gateway.active_profile,
                 "credentials": agent_gateway.list_catalog(),
@@ -411,6 +526,11 @@ async def agent_profile_route(request):
             status_code=400,
             headers=_cors_headers(),
         )
+    if payload.get("user_id") or payload.get("user_email"):
+        await agent_gateway.switch_or_resolve_user(
+            user_id=payload.get("user_id"),
+            email=payload.get("user_email"),
+        )
     prof = agent_gateway.update_active_profile(
         preset=payload.get("preset"),
         account=payload.get("account") or payload.get("credential"),
@@ -419,9 +539,11 @@ async def agent_profile_route(request):
         fallback_model=payload.get("fallback_model"),
         rpm=payload.get("rpm"),
     )
+    await agent_gateway.sync_active_user_to_db()
     return JSONResponse(
         {
             "status": "ok",
+            "active_user": agent_gateway.active_user,
             "active_profile": prof,
             "routes": agent_gateway.get_status()["routes"],
         },
@@ -443,11 +565,17 @@ async def agent_instructions_route(request):
         payload = {}
     if not isinstance(payload, dict):
         payload = {}
+    if payload.get("user_id") or payload.get("user_email"):
+        await agent_gateway.switch_or_resolve_user(
+            user_id=payload.get("user_id"),
+            email=payload.get("user_email"),
+        )
     inst = agent_gateway.update_agent_instructions(
         op=str(payload.get("op") or "save"),
         addendum=str(payload.get("addendum") or payload.get("text") or ""),
         note=str(payload.get("note") or ""),
     )
+    await agent_gateway.sync_active_user_to_db()
     return JSONResponse({"status": "ok", "agent_instructions": inst}, headers=_cors_headers())
 
 
@@ -461,11 +589,27 @@ async def plugin_embed_js(request):
     host_header = request.headers.get("host", f"localhost:{settings.mcp_port}")
     scheme = request.headers.get("x-forwarded-proto", request.url.scheme or "http")
     origin = f"{scheme}://{host_header}"
-    js_code = f"""(function() {{
+    js_code = f"""(async function() {{
   const ORIGIN = {json.dumps(origin)};
   const params = new URLSearchParams(window.location.search || window.location.hash.split('?')[1] || '');
   const fileId = params.get('file-id') || '';
   const pageId = params.get('page-id') || '';
+  let userId = '';
+  let userEmail = '';
+  let userName = '';
+  try {{
+    const profRes = await fetch('/api/rpc/command/get-profile', {{
+      credentials: 'include',
+      headers: {{ 'Accept': 'application/json' }}
+    }});
+    if (profRes.ok) {{
+      const prof = await profRes.json();
+      userId = prof.id || prof['~:id'] || '';
+      userEmail = prof.email || prof['~:email'] || '';
+      userName = prof.fullname || prof['~:fullname'] || '';
+    }}
+  }} catch (e) {{}}
+
   const existingDock = document.getElementById('penpot-ai-studio-dock');
   const existingFab = document.getElementById('penpot-ai-studio-fab');
   if (existingDock) existingDock.remove();
@@ -473,10 +617,14 @@ async def plugin_embed_js(request):
 
   const dock = document.createElement('div');
   dock.id = 'penpot-ai-studio-dock';
-  dock.style.cssText = 'position:fixed; right:18px; bottom:70px; width:430px; height:670px; z-index:99999; border-radius:14px; overflow:hidden; box-shadow:0 24px 60px rgba(0,0,0,0.65), 0 0 0 1px rgba(99,102,241,0.55); background:#090d16; transition:opacity 0.2s ease, transform 0.2s ease;';
+  dock.style.cssText = 'position:fixed; right:18px; bottom:70px; width:440px; height:685px; z-index:99999; border-radius:14px; overflow:hidden; box-shadow:0 24px 60px rgba(0,0,0,0.65), 0 0 0 1px rgba(99,102,241,0.55); background:#090d16; transition:opacity 0.2s ease, transform 0.2s ease;';
   const iframe = document.createElement('iframe');
   iframe.id = 'penpot-ai-studio-iframe';
-  iframe.src = ORIGIN + '/plugin/ui.html?file_id=' + encodeURIComponent(fileId) + '&page_id=' + encodeURIComponent(pageId);
+  iframe.src = ORIGIN + '/plugin/ui.html?file_id=' + encodeURIComponent(fileId)
+    + '&page_id=' + encodeURIComponent(pageId)
+    + '&user_id=' + encodeURIComponent(userId)
+    + '&user_email=' + encodeURIComponent(userEmail)
+    + '&user_name=' + encodeURIComponent(userName);
   iframe.style.cssText = 'width:100%; height:100%; border:none;';
   dock.appendChild(iframe);
   document.body.appendChild(dock);

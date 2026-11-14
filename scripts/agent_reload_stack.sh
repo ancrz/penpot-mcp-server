@@ -2,12 +2,12 @@
 # Runbook: Build and reload the Penpot MCP Server + AI Gateway container in the Penpot stack.
 # Environment variables:
 #   PENPOT_STACK_DIR: Path to the Penpot docker-compose stack (default: ../penpot)
-#   PENPOT_MCP_VERSION: Image version tag (default: 0.4.0)
+#   PENPOT_MCP_VERSION: Image version tag (default: 0.5.0)
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PENPOT_STACK_DIR="${PENPOT_STACK_DIR:-$(cd "${REPO_ROOT}/../penpot" && pwd)}"
-PENPOT_MCP_VERSION="${PENPOT_MCP_VERSION:-0.4.0}"
+PENPOT_MCP_VERSION="${PENPOT_MCP_VERSION:-0.5.0}"
 
 echo "[agent_reload_stack] Building penpot-mcp:${PENPOT_MCP_VERSION} from ${REPO_ROOT}..."
 docker build \

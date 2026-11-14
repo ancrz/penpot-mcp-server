@@ -25,12 +25,12 @@
 
 services:
   penpot-mcp:
-    image: "penpot-mcp:${PENPOT_MCP_VERSION:-0.4.0}"
+    image: "penpot-mcp:${PENPOT_MCP_VERSION:-0.5.0}"
     build:
       context: ./penpot-mcp-server
       dockerfile: Dockerfile
       args:
-        PENPOT_MCP_VERSION: "${PENPOT_MCP_VERSION:-0.4.0}"
+        PENPOT_MCP_VERSION: "${PENPOT_MCP_VERSION:-0.5.0}"
         PYTHON_IMAGE_TAG: "${PYTHON_IMAGE_TAG:-3.13-alpine}"
         UV_VERSION: "${UV_VERSION:-0.12.10}"
     container_name: penpot-mcp
@@ -46,7 +46,7 @@ services:
     networks:
       - penpot
     environment:
-      PENPOT_MCP_VERSION: "${PENPOT_MCP_VERSION:-0.4.0}"
+      PENPOT_MCP_VERSION: "${PENPOT_MCP_VERSION:-0.5.0}"
       MCP_PROTOCOL_VERSION: "${MCP_PROTOCOL_VERSION:-2025-03-26}"
       MCP_TOOL_MODE: "${MCP_TOOL_MODE:-compressed}"
       PENPOT_BASE_URL: "http://penpot-frontend:8080"
