@@ -104,6 +104,10 @@ def normalize_tool_result(raw: Any, action: str = "default") -> dict[str, Any]:
         else:
             out.setdefault("status", "OK")
         out.setdefault("action", action)
+        if "id" in out and "shape_id" not in out:
+            out["shape_id"] = out["id"]
+        elif "shape_id" in out and "id" not in out:
+            out["id"] = out["shape_id"]
         return out
     if isinstance(raw, list):
         if len(raw) == 1 and isinstance(raw[0], dict) and "error" in raw[0]:
