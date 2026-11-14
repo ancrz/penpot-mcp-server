@@ -826,3 +826,104 @@ async def test_sdk_agent_pipeline_gateway_translators_failover_and_chat(
     status_data = json.loads(status_resp.body.decode("utf-8"))
     assert status_data["status"] == "ok"
     assert "routes" in status_data
+
+
+@pytest.mark.asyncio
+async def test_vanguard_ai_gateway_config_profiles_and_write_only_keys() -> None:
+    """Verify Vanguard Control AI Gateway config: write-only key replacement, provider switching, and addendum versioning."""
+    from penpot_mcp.agent_gateway import PenpotAgentGateway
+    from penpot_mcp.server import (
+        agent_config_route,
+        agent_instructions_route,
+        agent_profile_route,
+        agent_providers_route,
+    )
+
+    agw = PenpotAgentGateway()
+    # 1. Upsert a Claude (Anthropic) profile and verify write-only masking
+    claude_entry = agw.upsert_credential(
+        name="claude-sonnet-pro",
+        provider="anthropic",
+        api_key="sk-ant-test-key-9876",
+        model="claude-sonnet-4-5",
+        tier="paid",
+        purpose="primary",
+        activate=True,
+    )
+    assert claude_entry["credential"] == "claude-sonnet-pro"
+    assert claude_entry["provider"] == "anthropic"
+    assert claude_entry["key_last4"] == "9876"
+    assert "sk-ant-test-key-9876" not in json.dumps(claude_entry)
+    assert agw.active_profile["account"] == "claude-sonnet-pro"
+    assert agw.active_profile["model"] == "claude-sonnet-4-5"
+
+    # 2. Replace the key in-place and confirm key_last4 updates
+    replaced = agw.upsert_credential(
+        name="claude-sonnet-pro",
+        provider="anthropic",
+        api_key="sk-ant-prod-key-4321",
+        model="claude-sonnet-4-5",
+        activate=True,
+    )
+    assert replaced["key_last4"] == "4321"
+
+    # 3. Upsert an OpenAI (ChatGPT) profile via the Starlette route
+    prov_req = SimpleNamespace(
+        method="POST",
+        query_params={},
+        json=AsyncMock(
+            return_value={
+                "name": "openai-chatgpt",
+                "provider": "openai",
+                "api_key": "sk-proj-openai-1122",
+                "model": "gpt-4o",
+                "activate": True,
+            }
+        ),
+    )
+    prov_resp = await agent_providers_route(prov_req)
+    prov_data = json.loads(prov_resp.body.decode("utf-8"))
+    assert prov_data["status"] == "ok"
+    assert prov_data["credential"]["key_last4"] == "1122"
+    assert prov_data["active_profile"]["provider"] == "openai"
+    assert prov_data["active_profile"]["model"] == "gpt-4o"
+
+    # 4. Switch active profile via /agent/profile and update instructions via /agent/instructions
+    prof_req = SimpleNamespace(
+        method="POST",
+        json=AsyncMock(
+            return_value={
+                "preset": "auto",
+                "account": "google-primary",
+                "provider": "gemini",
+                "model": "gemini-3.5-flash-lite",
+                "rpm": 20,
+            }
+        ),
+    )
+    prof_resp = await agent_profile_route(prof_req)
+    prof_data = json.loads(prof_resp.body.decode("utf-8"))
+    assert prof_data["active_profile"]["provider"] == "gemini"
+    assert prof_data["active_profile"]["rpm"] == 20
+
+    inst_req = SimpleNamespace(
+        method="POST",
+        json=AsyncMock(
+            return_value={
+                "op": "save",
+                "addendum": "Use 8px spacing grid and Inter typography.",
+                "note": "Corporate design system rules",
+            }
+        ),
+    )
+    inst_resp = await agent_instructions_route(inst_req)
+    inst_data = json.loads(inst_resp.body.decode("utf-8"))
+    assert "8px spacing grid" in inst_data["agent_instructions"]["addendum"]
+    assert inst_data["agent_instructions"]["version"] >= 2
+
+    cfg_req = SimpleNamespace(method="GET")
+    cfg_resp = await agent_config_route(cfg_req)
+    cfg_data = json.loads(cfg_resp.body.decode("utf-8"))
+    assert cfg_data["status"] == "ok"
+    assert len(cfg_data["providers_catalog"]) >= 6
+

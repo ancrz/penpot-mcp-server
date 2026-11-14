@@ -174,10 +174,15 @@ class CircuitBreakers:
                 self._breakers.pop(scope, None)
         return out
 
-    def reset(self) -> int:
-        count = len(self._breakers)
-        self._breakers.clear()
-        return count
+    def reset(self, scope: Optional[str] = None) -> int:
+        if not scope:
+            count = len(self._breakers)
+            self._breakers.clear()
+            return count
+        removed = [k for k in list(self._breakers.keys()) if k == scope or k.startswith(f"{scope}:")]
+        for k in removed:
+            self._breakers.pop(k, None)
+        return len(removed)
 
 
 class InProcessRpmLimiter:
@@ -1129,6 +1134,103 @@ class AgentTurnResult:
     latency_ms: float = 0.0
 
 
+PROVIDERS_CATALOG: list[dict[str, Any]] = [
+    {
+        "id": "gemini",
+        "label": "Google Gemini (AI Studio)",
+        "freeTier": True,
+        "default_base_url": "https://generativelanguage.googleapis.com",
+        "default_models": ["gemini-3.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro"],
+        "note": "Has a free tier with low RPM and paid tier by use.",
+    },
+    {
+        "id": "anthropic",
+        "label": "Anthropic (Claude)",
+        "freeTier": False,
+        "default_base_url": "https://api.anthropic.com/v1",
+        "default_models": ["claude-sonnet-4-5", "claude-3-5-haiku-latest", "claude-opus-4-5"],
+        "note": "Billed by use; native Anthropic Messages API.",
+    },
+    {
+        "id": "openai",
+        "label": "OpenAI (ChatGPT)",
+        "freeTier": False,
+        "default_base_url": "https://api.openai.com/v1",
+        "default_models": ["gpt-4o", "gpt-4o-mini", "o3-mini"],
+        "note": "Billed by use; OpenAI Chat Completions API.",
+    },
+    {
+        "id": "deepseek",
+        "label": "DeepSeek",
+        "freeTier": False,
+        "default_base_url": "https://api.deepseek.com/v1",
+        "default_models": ["deepseek-chat", "deepseek-reasoner"],
+        "note": "Billed by use; OpenAI-compatible protocol.",
+    },
+    {
+        "id": "openai_compatible",
+        "label": "Other OpenAI-Compatible (Groq / OpenRouter)",
+        "freeTier": False,
+        "default_base_url": "https://api.openai.com/v1",
+        "default_models": ["gpt-4o-mini", "llama-3.3-70b-versatile"],
+        "note": "Any HTTPS base URL that speaks /chat/completions.",
+    },
+    {
+        "id": "local",
+        "label": "Local Model Server (Ollama / llama.cpp)",
+        "freeTier": False,
+        "default_base_url": "http://host.docker.internal:11434/v1",
+        "default_models": ["gemma4:e2b", "qwen2.5-coder:7b", "llama3.2:3b"],
+        "note": "No key, no quota, runs locally without internet.",
+    },
+]
+
+PRESETS_CATALOG: list[dict[str, Any]] = [
+    {
+        "name": "auto",
+        "kind": "routed",
+        "description": "Cloud primary + backup accounts with automatic SDD deterministic fallback.",
+    },
+    {
+        "name": "demo-free",
+        "kind": "routed",
+        "description": "Google Gemini AI Studio free tier (low RPM) with backup failover.",
+    },
+    {
+        "name": "paid",
+        "kind": "routed",
+        "description": "Production cloud models (Claude Sonnet 4.5, ChatGPT GPT-4o, Gemini Pro).",
+    },
+    {
+        "name": "local",
+        "kind": "routed",
+        "description": "Local Ollama / vLLM server only (zero cloud traffic).",
+    },
+    {
+        "name": "offline",
+        "kind": "offline",
+        "description": "Deterministic SDD Code Mode stand-in (zero tokens, instant execution).",
+    },
+]
+
+BASE_AGENT_INSTRUCTION = (
+    "You are Penpot AI Studio, an expert UI/UX design agent embedded inside Penpot via the "
+    "Penpot MCP Hybrid Gateway and SDK Agent Pipeline.\n"
+    "Rules:\n"
+    "1. When the user asks to create a card, hero section, login form, pricing card, navbar, or UI layout, "
+    "call `create_ui_artifact` or `run_penpot_batch` immediately to materialize it on the active page.\n"
+    "2. When modifying selected shapes, inspecting CSS/SVG, or binding tokens, call `call_penpot_branch_tool`.\n"
+    "3. Keep your final response concise and in the user's language (Spanish or English)."
+)
+
+
+def _mask_last4(secret: str) -> Optional[str]:
+    cleaned = (secret or "").strip()
+    if not cleaned:
+        return None
+    return cleaned[-4:] if len(cleaned) >= 4 else "****"
+
+
 class PenpotAgentGateway:
     """Modular SDK Agent Pipeline & AI Gateway embedded in Penpot MCP Server."""
 
@@ -1142,73 +1244,546 @@ class PenpotAgentGateway:
             "calls_total": 0,
             "last_latency_ms": 0.0,
         }
+        self._config_path = "/tmp/penpot_ai_gateway_profiles.json"
+        self.credentials: dict[str, dict[str, Any]] = {}
+        self.active_profile: dict[str, Any] = {
+            "preset": (settings.penpot_agent_mode or "auto").strip().lower(),
+            "account": "google-primary",
+            "provider": "gemini",
+            "model": (settings.penpot_agent_model or "gemini-3.5-flash-lite").strip(),
+            "fallback_model": (settings.penpot_agent_fallback_model or "gemini-2.5-flash").strip(),
+            "rpm": int(settings.penpot_agent_rpm or 15),
+        }
+        self.agent_instructions: dict[str, Any] = {
+            "base": BASE_AGENT_INSTRUCTION,
+            "addendum": "",
+            "version": 1,
+            "note": "Base instruction (.env default)",
+            "updated_at": None,
+            "history": [],
+        }
+        self._seed_from_env()
+        self._load_persisted_state()
 
-    def build_route_chain(self) -> list[ProviderRoute]:
-        """Construct the ordered failover chain from configured .env credentials."""
-        mode = (settings.penpot_agent_mode or "auto").strip().lower()
+    def _seed_from_env(self) -> None:
+        """Seed initial provider credentials from .env settings."""
         primary_model = (settings.penpot_agent_model or "gemini-3.5-flash-lite").strip()
         fallback_model = (settings.penpot_agent_fallback_model or "gemini-2.5-flash").strip()
-        models = [primary_model] + ([fallback_model] if fallback_model and fallback_model != primary_model else [])
+        g_models = [primary_model] + (
+            [fallback_model] if fallback_model and fallback_model != primary_model else []
+        )
+        for m in ("gemini-2.5-flash", "gemini-2.5-pro"):
+            if m not in g_models:
+                g_models.append(m)
+
+        if settings.google_api_key.strip():
+            self.credentials["google-primary"] = {
+                "name": "google-primary",
+                "provider": "gemini",
+                "tier": "free",
+                "purpose": "primary",
+                "description": "Primary Google AI Studio key (.env)",
+                "api_key": settings.google_api_key.strip(),
+                "base_url": settings.google_gemini_base_url.rstrip("/"),
+                "models": list(g_models),
+                "source": "env",
+            }
+        if settings.google_api_key_backup.strip():
+            self.credentials["google-backup"] = {
+                "name": "google-backup",
+                "provider": "gemini",
+                "tier": "free",
+                "purpose": "backup",
+                "description": "Backup Google AI Studio key (.env)",
+                "api_key": settings.google_api_key_backup.strip(),
+                "base_url": settings.google_gemini_base_url.rstrip("/"),
+                "models": list(g_models),
+                "source": "env",
+            }
+        if settings.openai_api_key.strip():
+            self.credentials["openai-primary"] = {
+                "name": "openai-primary",
+                "provider": "openai",
+                "tier": "paid",
+                "purpose": "backup",
+                "description": "OpenAI ChatGPT API key (.env)",
+                "api_key": settings.openai_api_key.strip(),
+                "base_url": settings.openai_base_url.rstrip("/"),
+                "models": ["gpt-4o", "gpt-4o-mini", "o3-mini"],
+                "source": "env",
+            }
+        if settings.anthropic_api_key.strip():
+            self.credentials["anthropic-primary"] = {
+                "name": "anthropic-primary",
+                "provider": "anthropic",
+                "tier": "paid",
+                "purpose": "backup",
+                "description": "Anthropic Claude API key (.env)",
+                "api_key": settings.anthropic_api_key.strip(),
+                "base_url": settings.anthropic_base_url.rstrip("/"),
+                "models": ["claude-sonnet-4-5", "claude-3-5-haiku-latest", "claude-opus-4-5"],
+                "source": "env",
+            }
+        if settings.ollama_base_url.strip():
+            self.credentials["ollama-local"] = {
+                "name": "ollama-local",
+                "provider": "local",
+                "tier": "local",
+                "purpose": "local",
+                "description": "Local Ollama / OpenAI-compatible server",
+                "api_key": "",
+                "base_url": settings.ollama_base_url.rstrip("/"),
+                "models": [settings.ollama_model or "gemma4:e2b", "qwen2.5-coder:7b", "llama3.2:3b"],
+                "source": "env",
+            }
+
+    def _load_persisted_state(self) -> None:
+        """Load runtime profile & credential overrides if persisted on disk."""
+        import os
+
+        if not os.path.exists(self._config_path):
+            return
+        try:
+            with open(self._config_path, encoding="utf-8") as fh:
+                data = json.load(fh)
+            for name, cred in (data.get("credentials") or {}).items():
+                if isinstance(cred, dict) and cred.get("provider"):
+                    self.credentials[name] = cred
+            if isinstance(data.get("active_profile"), dict):
+                self.active_profile.update(data["active_profile"])
+            if isinstance(data.get("agent_instructions"), dict):
+                self.agent_instructions.update(data["agent_instructions"])
+        except Exception as exc:
+            logger.debug("Could not load persisted gateway config: %s", exc)
+
+    def _save_persisted_state(self) -> None:
+        """Persist runtime profiles & credentials with 0600 permissions."""
+        import os
+
+        try:
+            payload = {
+                "credentials": self.credentials,
+                "active_profile": self.active_profile,
+                "agent_instructions": self.agent_instructions,
+            }
+            with open(self._config_path, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh, indent=2)
+            os.chmod(self._config_path, 0o600)
+        except Exception as exc:
+            logger.debug("Could not persist gateway config: %s", exc)
+
+    def list_catalog(self) -> list[dict[str, Any]]:
+        """Return the provider credentials catalog with masked keys (write-only security)."""
+        out: list[dict[str, Any]] = []
+        for name, cred in self.credentials.items():
+            raw_key = str(cred.get("api_key") or "")
+            out.append(
+                {
+                    "credential": name,
+                    "provider": cred.get("provider", "gemini"),
+                    "tier": cred.get("tier", "free"),
+                    "purpose": cred.get("purpose", "primary"),
+                    "description": cred.get("description", ""),
+                    "key_last4": _mask_last4(raw_key),
+                    "has_key": bool(raw_key) or cred.get("provider") == "local",
+                    "base_url": cred.get("base_url", ""),
+                    "models": list(cred.get("models") or []),
+                    "source": cred.get("source", "user"),
+                    "validated_at": cred.get("validated_at"),
+                }
+            )
+        return out
+
+    def upsert_credential(
+        self,
+        *,
+        name: str,
+        provider: str,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        tier: str | None = None,
+        purpose: str | None = None,
+        description: str | None = None,
+        model: str | None = None,
+        activate: bool = False,
+    ) -> dict[str, Any]:
+        """Create or replace a provider credential/account in-place (Vanguard Control ProvidersTab)."""
+        clean_name = re.sub(r"[^a-zA-Z0-9_.\-]", "-", (name or "").strip().lower()).strip("-")
+        if not clean_name:
+            raise ValueError("Account name is required (e.g. 'claude-main', 'openai-gpt4o', 'google-primary').")
+        prov = (provider or "gemini").strip().lower()
+        prov_meta = next((p for p in PROVIDERS_CATALOG if p["id"] == prov), None)
+        if prov_meta is None:
+            raise ValueError(f"Unsupported provider '{prov}'.")
+
+        existing = self.credentials.get(clean_name, {})
+        eff_key = (
+            api_key.strip()
+            if (api_key is not None and api_key.strip() and api_key.strip() != "KEEP")
+            else str(existing.get("api_key") or "")
+        )
+        if prov != "local" and not eff_key:
+            raise ValueError(f"API key is required for provider '{prov}'.")
+
+        eff_base_url = (
+            (base_url or "").strip().rstrip("/")
+            or str(existing.get("base_url") or "")
+            or str(prov_meta["default_base_url"])
+        )
+        models = list(existing.get("models") or prov_meta["default_models"])
+        if model and model.strip() and model.strip() not in models:
+            models.insert(0, model.strip())
+
+        import datetime
+
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        record = {
+            "name": clean_name,
+            "provider": prov,
+            "tier": (tier or existing.get("tier") or ("free" if prov_meta["freeTier"] else "paid")).strip(),
+            "purpose": (purpose or existing.get("purpose") or "primary").strip(),
+            "description": (
+                description.strip()
+                if description is not None
+                else str(existing.get("description") or f"{prov_meta['label']} profile")
+            ),
+            "api_key": eff_key,
+            "base_url": eff_base_url,
+            "models": models,
+            "source": "user",
+            "validated_at": now_iso,
+        }
+        self.credentials[clean_name] = record
+        # Reset any open circuit breaker for this account so the new/replaced key is tried immediately
+        self.breakers.reset(f"account:{clean_name}")
+
+        if activate or record["purpose"] == "primary":
+            chosen_model = (model or "").strip() or models[0]
+            self.active_profile.update(
+                {
+                    "preset": "local" if prov == "local" else ("demo-free" if record["tier"] == "free" else "paid"),
+                    "account": clean_name,
+                    "provider": prov,
+                    "model": chosen_model,
+                    "fallback_model": models[1] if len(models) > 1 else chosen_model,
+                }
+            )
+            self.serving_state.update(
+                {
+                    "tier": "primary",
+                    "provider": prov,
+                    "model": chosen_model,
+                }
+            )
+
+        self._save_persisted_state()
+        return next(c for c in self.list_catalog() if c["credential"] == clean_name)
+
+    def delete_credential(self, name: str) -> dict[str, Any]:
+        """Delete a stored provider credential profile."""
+        clean_name = (name or "").strip()
+        removed = self.credentials.pop(clean_name, None)
+        if removed is None:
+            raise KeyError(f"Credential '{clean_name}' not found.")
+        if self.active_profile.get("account") == clean_name:
+            first = next(iter(self.credentials.values()), None)
+            if first:
+                self.active_profile["account"] = first["name"]
+                self.active_profile["provider"] = first["provider"]
+                self.active_profile["model"] = (first.get("models") or ["gemini-3.5-flash-lite"])[0]
+        self._save_persisted_state()
+        return {"status": "ok", "deleted": clean_name}
+
+    async def test_provider_key(
+        self,
+        *,
+        provider: str,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        credential_name: str | None = None,
+    ) -> dict[str, Any]:
+        """Test a provider API key or local endpoint and return its available generative models."""
+        prov = (provider or "gemini").strip().lower()
+        prov_meta = next((p for p in PROVIDERS_CATALOG if p["id"] == prov), PROVIDERS_CATALOG[0])
+        eff_key = (api_key or "").strip()
+        if (not eff_key or eff_key == "KEEP") and credential_name and credential_name in self.credentials:
+            eff_key = str(self.credentials[credential_name].get("api_key") or "")
+        eff_base = (base_url or "").strip().rstrip("/") or str(prov_meta["default_base_url"])
+
+        if prov != "local" and not eff_key:
+            return {"ok": False, "provider": prov, "models": [], "error": "Missing API key."}
+
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0)) as client:
+            try:
+                if prov == "gemini":
+                    resp = await client.get(
+                        f"{eff_base}/v1beta/models",
+                        headers={"x-goog-api-key": eff_key},
+                    )
+                    if resp.status_code >= 400:
+                        return {
+                            "ok": False,
+                            "provider": prov,
+                            "models": [],
+                            "error": f"Gemini HTTP {resp.status_code}",
+                        }
+                    data = resp.json()
+                    models = [
+                        m["name"].split("/")[-1]
+                        for m in (data.get("models") or [])
+                        if "generateContent" in (m.get("supportedGenerationMethods") or [])
+                    ]
+                    return {
+                        "ok": True,
+                        "provider": prov,
+                        "models": models[:15] or list(prov_meta["default_models"]),
+                    }
+
+                if prov in ("openai", "deepseek", "openai_compatible", "local"):
+                    headers = {"Authorization": f"Bearer {eff_key}"} if eff_key else {}
+                    resp = await client.get(f"{eff_base}/models", headers=headers)
+                    if resp.status_code >= 400:
+                        return {
+                            "ok": False,
+                            "provider": prov,
+                            "models": [],
+                            "error": f"{prov} HTTP {resp.status_code}",
+                        }
+                    data = resp.json()
+                    models = [
+                        str(m.get("id"))
+                        for m in (data.get("data") or [])
+                        if isinstance(m, dict) and m.get("id")
+                    ]
+                    return {
+                        "ok": True,
+                        "provider": prov,
+                        "models": models[:20] or list(prov_meta["default_models"]),
+                    }
+
+                if prov == "anthropic":
+                    resp = await client.get(
+                        f"{eff_base}/models",
+                        headers={
+                            "x-api-key": eff_key,
+                            "anthropic-version": "2023-06-01",
+                        },
+                    )
+                    if resp.status_code >= 400:
+                        return {
+                            "ok": False,
+                            "provider": prov,
+                            "models": [],
+                            "error": f"Anthropic HTTP {resp.status_code}",
+                        }
+                    data = resp.json()
+                    models = [
+                        str(m.get("id"))
+                        for m in (data.get("data") or [])
+                        if isinstance(m, dict) and m.get("id")
+                    ]
+                    return {
+                        "ok": True,
+                        "provider": prov,
+                        "models": models[:15] or list(prov_meta["default_models"]),
+                    }
+            except Exception as exc:
+                return {
+                    "ok": False,
+                    "provider": prov,
+                    "models": list(prov_meta["default_models"]),
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+
+        return {"ok": True, "provider": prov, "models": list(prov_meta["default_models"])}
+
+    def update_active_profile(
+        self,
+        *,
+        preset: str | None = None,
+        account: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+        fallback_model: str | None = None,
+        rpm: int | None = None,
+    ) -> dict[str, Any]:
+        """Switch active agent preset, provider account, and model on the fly without restart."""
+        if preset is not None and preset.strip():
+            clean_preset = preset.strip().lower()
+            self.active_profile["preset"] = clean_preset
+            if clean_preset == "offline":
+                self.serving_state.update(
+                    {"tier": "deterministic", "provider": "offline", "model": "sdd-code-mode-v1"}
+                )
+            elif clean_preset == "local" and "ollama-local" in self.credentials:
+                self.active_profile["account"] = "ollama-local"
+                self.active_profile["provider"] = "local"
+                self.active_profile["model"] = (
+                    self.credentials["ollama-local"].get("models") or ["gemma4:e2b"]
+                )[0]
+
+        if account is not None and account.strip():
+            acc_name = account.strip()
+            self.active_profile["account"] = acc_name
+            cred = self.credentials.get(acc_name)
+            if cred:
+                self.active_profile["provider"] = cred.get("provider", "gemini")
+                if not model:
+                    self.active_profile["model"] = (cred.get("models") or ["gemini-3.5-flash-lite"])[0]
+
+        if provider is not None and provider.strip():
+            self.active_profile["provider"] = provider.strip().lower()
+
+        if model is not None and model.strip():
+            self.active_profile["model"] = model.strip()
+
+        if fallback_model is not None:
+            self.active_profile["fallback_model"] = fallback_model.strip()
+
+        if rpm is not None and int(rpm) > 0:
+            self.active_profile["rpm"] = int(rpm)
+
+        if self.active_profile.get("preset") != "offline":
+            self.serving_state.update(
+                {
+                    "tier": "primary",
+                    "provider": self.active_profile.get("provider", "gemini"),
+                    "model": self.active_profile.get("model", settings.penpot_agent_model),
+                }
+            )
+        self._save_persisted_state()
+        return dict(self.active_profile)
+
+    def update_agent_instructions(
+        self,
+        *,
+        op: str = "save",
+        addendum: str = "",
+        note: str = "",
+    ) -> dict[str, Any]:
+        """Save or reset the versioned agent instruction addendum (Vanguard Control AgentsTab)."""
+        import datetime
+
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        next_ver = int(self.agent_instructions.get("version", 1)) + 1
+        clean_op = (op or "save").strip().lower()
+        new_addendum = "" if clean_op == "reset" else addendum.strip()
+        clean_note = (note or "").strip() or (
+            "Reset to base instruction" if clean_op == "reset" else f"Updated addendum v{next_ver}"
+        )
+        history = list(self.agent_instructions.get("history") or [])
+        history.insert(
+            0,
+            {
+                "version": next_ver,
+                "kind": "reset" if clean_op == "reset" else "save",
+                "addendum": new_addendum,
+                "note": clean_note,
+                "created_at": now_iso,
+            },
+        )
+        self.agent_instructions.update(
+            {
+                "addendum": new_addendum,
+                "version": next_ver,
+                "note": clean_note,
+                "updated_at": now_iso,
+                "history": history[:20],
+            }
+        )
+        self._save_persisted_state()
+        return dict(self.agent_instructions)
+
+    def get_config(self) -> dict[str, Any]:
+        """Return complete AI Gateway configuration for the Mini-Chat Config Drawer."""
+        status = self.get_status()
+        return {
+            "status": "ok",
+            "active_profile": dict(self.active_profile),
+            "presets": PRESETS_CATALOG,
+            "providers_catalog": PROVIDERS_CATALOG,
+            "credentials": self.list_catalog(),
+            "agent_instructions": {
+                "base": self.agent_instructions.get("base", BASE_AGENT_INSTRUCTION),
+                "addendum": self.agent_instructions.get("addendum", ""),
+                "version": self.agent_instructions.get("version", 1),
+                "note": self.agent_instructions.get("note", ""),
+                "updated_at": self.agent_instructions.get("updated_at"),
+                "history": self.agent_instructions.get("history", []),
+            },
+            "routes": status["routes"],
+            "serving": status["serving"],
+            "breakers": status["breakers"],
+        }
+
+    def build_route_chain(self) -> list[ProviderRoute]:
+        """Construct the ordered failover chain from active profile + stored credentials."""
+        preset = (self.active_profile.get("preset") or settings.penpot_agent_mode or "auto").strip().lower()
+        primary_acc = (self.active_profile.get("account") or "google-primary").strip()
+        primary_model = (
+            self.active_profile.get("model") or settings.penpot_agent_model or "gemini-3.5-flash-lite"
+        ).strip()
+        fallback_model = (
+            self.active_profile.get("fallback_model") or settings.penpot_agent_fallback_model or ""
+        ).strip()
 
         routes: list[ProviderRoute] = []
-        if mode != "deterministic":
-            if mode != "local":
-                if settings.google_api_key.strip():
+        if preset not in ("deterministic", "offline"):
+            # 1. Place the selected active account first as 'primary'
+            active_cred = self.credentials.get(primary_acc)
+            if active_cred and (active_cred.get("api_key") or active_cred.get("provider") == "local"):
+                if preset != "local" or active_cred.get("provider") == "local":
+                    p_models = [primary_model]
+                    if fallback_model and fallback_model != primary_model:
+                        p_models.append(fallback_model)
                     routes.append(
                         ProviderRoute(
                             tier="primary",
-                            provider="gemini",
-                            account="google-primary",
-                            models=models,
-                            api_key=settings.google_api_key.strip(),
-                            base_url=settings.google_gemini_base_url.rstrip("/"),
-                            cloud=True,
+                            provider=str(active_cred.get("provider") or "gemini"),
+                            account=primary_acc,
+                            models=p_models,
+                            api_key=str(active_cred.get("api_key") or ""),
+                            base_url=str(active_cred.get("base_url") or "").rstrip("/"),
+                            cloud=active_cred.get("provider") != "local",
                         )
                     )
-                if settings.google_api_key_backup.strip():
-                    routes.append(
-                        ProviderRoute(
-                            tier="backup",
-                            provider="gemini",
-                            account="google-backup",
-                            models=models,
-                            api_key=settings.google_api_key_backup.strip(),
-                            base_url=settings.google_gemini_base_url.rstrip("/"),
-                            cloud=True,
-                        )
+
+            # 2. Append remaining configured accounts as ordered backups
+            for acc_name, cred in self.credentials.items():
+                if acc_name == primary_acc:
+                    continue
+                prov = str(cred.get("provider") or "gemini")
+                if preset == "local" and prov != "local":
+                    continue
+                if preset != "local" and prov == "local":
+                    continue
+                if not cred.get("api_key") and prov != "local":
+                    continue
+                c_models = list(cred.get("models") or [primary_model])
+                if prov == self.active_profile.get("provider") and primary_model not in c_models:
+                    c_models.insert(0, primary_model)
+                routes.append(
+                    ProviderRoute(
+                        tier="local" if prov == "local" else "backup",
+                        provider=prov,
+                        account=acc_name,
+                        models=c_models[:2],
+                        api_key=str(cred.get("api_key") or ""),
+                        base_url=str(cred.get("base_url") or "").rstrip("/"),
+                        cloud=prov != "local",
                     )
-                if settings.openai_api_key.strip():
-                    routes.append(
-                        ProviderRoute(
-                            tier="backup-openai",
-                            provider="openai",
-                            account="openai-primary",
-                            models=["gpt-4o-mini"],
-                            api_key=settings.openai_api_key.strip(),
-                            base_url=settings.openai_base_url.rstrip("/"),
-                            cloud=True,
-                        )
-                    )
-                if settings.anthropic_api_key.strip():
-                    routes.append(
-                        ProviderRoute(
-                            tier="backup-anthropic",
-                            provider="anthropic",
-                            account="anthropic-primary",
-                            models=["claude-3-5-haiku-latest"],
-                            api_key=settings.anthropic_api_key.strip(),
-                            base_url=settings.anthropic_base_url.rstrip("/"),
-                            cloud=True,
-                        )
-                    )
-            if mode == "local" and settings.ollama_base_url.strip():
+                )
+
+            # 3. If local Ollama is configured and not yet in the chain, add it as local fallback before offline
+            if preset != "local" and "ollama-local" in self.credentials:
+                loc = self.credentials["ollama-local"]
                 routes.append(
                     ProviderRoute(
                         tier="local",
                         provider="local",
                         account="ollama-local",
-                        models=[settings.ollama_model or "gemma4:e2b"],
-                        base_url=settings.ollama_base_url.rstrip("/"),
+                        models=list(loc.get("models") or ["gemma4:e2b"])[:1],
+                        base_url=str(loc.get("base_url") or "http://host.docker.internal:11434/v1").rstrip("/"),
                         cloud=False,
                     )
                 )
@@ -1230,13 +1805,26 @@ class PenpotAgentGateway:
         live_ctx = gateway.active_context
         return {
             "status": "ok",
-            "agent_mode": settings.penpot_agent_mode,
-            "default_model": settings.penpot_agent_model,
-            "fallback_model": settings.penpot_agent_fallback_model,
-            "has_primary_key": bool(settings.google_api_key.strip()),
-            "has_backup_key": bool(settings.google_api_key_backup.strip()),
-            "has_openai_key": bool(settings.openai_api_key.strip()),
-            "has_anthropic_key": bool(settings.anthropic_api_key.strip()),
+            "agent_mode": self.active_profile.get("preset", settings.penpot_agent_mode),
+            "active_account": self.active_profile.get("account", "google-primary"),
+            "active_provider": self.active_profile.get("provider", "gemini"),
+            "default_model": self.active_profile.get("model", settings.penpot_agent_model),
+            "fallback_model": self.active_profile.get("fallback_model", settings.penpot_agent_fallback_model),
+            "rpm": self.active_profile.get("rpm", settings.penpot_agent_rpm),
+            "addendum_version": self.agent_instructions.get("version", 1),
+            "has_addendum": bool(self.agent_instructions.get("addendum")),
+            "has_primary_key": any(
+                c.get("provider") == "gemini" and c.get("has_key") for c in self.list_catalog()
+            ),
+            "has_backup_key": len([c for c in self.list_catalog() if c.get("has_key")]) > 1,
+            "has_openai_key": any(
+                c.get("provider") in ("openai", "deepseek", "openai_compatible") and c.get("has_key")
+                for c in self.list_catalog()
+            ),
+            "has_anthropic_key": any(
+                c.get("provider") == "anthropic" and c.get("has_key") for c in self.list_catalog()
+            ),
+            "credentials_count": len(self.credentials),
             "routes": [
                 {
                     "tier": r.tier,
@@ -1313,7 +1901,8 @@ class PenpotAgentGateway:
     ) -> tuple[Optional[dict[str, Any]], Optional[RouteFailure]]:
         """Invoke a single provider route using the Gemini REST protocol or translated schema."""
         if route.cloud:
-            await self.rpm_limiter.acquire(f"{route.account}:{model}", settings.penpot_agent_rpm)
+            eff_rpm = int(self.active_profile.get("rpm") or settings.penpot_agent_rpm or 15)
+            await self.rpm_limiter.acquire(f"{route.account}:{model}", eff_rpm)
 
         if route.provider == "gemini":
             body_fixed, _ = backfill_thought_signatures(gemini_body)
@@ -1344,7 +1933,7 @@ class PenpotAgentGateway:
                     break
             return payload, None
 
-        if route.provider in ("openai", "local"):
+        if route.provider in ("openai", "deepseek", "openai_compatible", "local"):
             url = f"{route.base_url}/chat/completions"
             headers = {"content-type": "application/json"}
             if route.api_key:
@@ -1684,7 +2273,7 @@ class PenpotAgentGateway:
                 status="OK",
                 reply=reply_text,
                 provider_used="sdd-quick-action",
-                model_used=settings.penpot_agent_model,
+                model_used=str(self.active_profile.get("model") or settings.penpot_agent_model),
                 tier_used="quick-action",
                 file_id=canvas_ctx.get("file_id"),
                 page_id=canvas_ctx.get("page_id"),
@@ -1693,6 +2282,12 @@ class PenpotAgentGateway:
                 latency_ms=latency,
             )
 
+        addendum_text = str(self.agent_instructions.get("addendum") or "").strip()
+        addendum_block = (
+            f"\n\nAdministrator Addendum (v{self.agent_instructions.get('version', 1)}):\n{addendum_text}"
+            if addendum_text
+            else ""
+        )
         system_prompt = (
             "You are Penpot AI Studio, an expert UI/UX design agent embedded inside Penpot via the "
             "Penpot MCP Hybrid Gateway and SDK Agent Pipeline.\n"
@@ -1708,6 +2303,7 @@ class PenpotAgentGateway:
             "call `create_ui_artifact` or `run_penpot_batch` immediately to materialize it on the active page.\n"
             "2. When modifying selected shapes, inspecting CSS/SVG, or binding tokens, call `call_penpot_branch_tool`.\n"
             "3. Keep your final response concise and in the user's language (Spanish or English)."
+            f"{addendum_block}"
         )
 
         contents: list[dict[str, Any]] = []
@@ -1719,7 +2315,7 @@ class PenpotAgentGateway:
 
         fallback_reasons: list[str] = []
         used_route: Optional[ProviderRoute] = None
-        used_model = settings.penpot_agent_model
+        used_model = str(self.active_profile.get("model") or settings.penpot_agent_model)
         final_reply = ""
 
         for _turn in range(max(1, settings.penpot_agent_max_turns)):

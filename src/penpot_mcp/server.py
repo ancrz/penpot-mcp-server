@@ -189,7 +189,7 @@ async def plugin_config(request):
 def _cors_headers() -> dict[str, str]:
     return {
         "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type, Authorization",
     }
 
@@ -284,8 +284,217 @@ async def agent_breakers_reset(request):
 
     if request.method == "OPTIONS":
         return Response(status_code=204, headers=_cors_headers())
-    count = agent_gateway.breakers.reset()
+    try:
+        body = await request.json()
+        scope = body.get("scope") if isinstance(body, dict) else None
+    except Exception:
+        scope = None
+    count = agent_gateway.breakers.reset(scope)
     return JSONResponse({"status": "ok", "reset_count": count}, headers=_cors_headers())
+
+
+@mcp.custom_route("/agent/config", methods=["GET", "OPTIONS"])
+async def agent_config_route(request):
+    """Return full AI Gateway configuration (presets, providers, masked keys, active profile, instructions)."""
+    from starlette.responses import Response
+    from penpot_mcp.agent_gateway import agent_gateway
+
+    if request.method == "OPTIONS":
+        return Response(status_code=204, headers=_cors_headers())
+    cfg = agent_gateway.get_config()
+    cfg["resolved_canvas"] = await agent_gateway.resolve_target_canvas()
+    return JSONResponse(cfg, headers=_cors_headers())
+
+
+@mcp.custom_route("/agent/providers", methods=["POST", "PUT", "DELETE", "OPTIONS"])
+async def agent_providers_route(request):
+    """Create, replace (write-only API key), or delete a provider credential profile."""
+    from starlette.responses import Response
+    from penpot_mcp.agent_gateway import agent_gateway
+
+    if request.method == "OPTIONS":
+        return Response(status_code=204, headers=_cors_headers())
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        return JSONResponse(
+            {"status": "ERROR", "error": "JSON body must be an object."},
+            status_code=400,
+            headers=_cors_headers(),
+        )
+
+    if request.method == "DELETE" or payload.get("action") == "delete":
+        name = str(payload.get("name") or request.query_params.get("name") or "").strip()
+        try:
+            res = agent_gateway.delete_credential(name)
+            return JSONResponse(res, headers=_cors_headers())
+        except KeyError as exc:
+            return JSONResponse(
+                {"status": "NOT_FOUND", "error": str(exc)},
+                status_code=404,
+                headers=_cors_headers(),
+            )
+
+    try:
+        entry = agent_gateway.upsert_credential(
+            name=str(payload.get("name") or ""),
+            provider=str(payload.get("provider") or "gemini"),
+            api_key=payload.get("api_key"),
+            base_url=payload.get("base_url"),
+            tier=payload.get("tier"),
+            purpose=payload.get("purpose"),
+            description=payload.get("description"),
+            model=payload.get("model"),
+            activate=bool(payload.get("activate", True)),
+        )
+        return JSONResponse(
+            {
+                "status": "ok",
+                "credential": entry,
+                "active_profile": agent_gateway.active_profile,
+                "credentials": agent_gateway.list_catalog(),
+            },
+            headers=_cors_headers(),
+        )
+    except ValueError as exc:
+        return JSONResponse(
+            {"status": "PARAM_ERROR", "error": str(exc)},
+            status_code=422,
+            headers=_cors_headers(),
+        )
+
+
+@mcp.custom_route("/agent/providers/test", methods=["POST", "OPTIONS"])
+async def agent_providers_test_route(request):
+    """Test a provider API key or local endpoint and list its generative models."""
+    from starlette.responses import Response
+    from penpot_mcp.agent_gateway import agent_gateway
+
+    if request.method == "OPTIONS":
+        return Response(status_code=204, headers=_cors_headers())
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    res = await agent_gateway.test_provider_key(
+        provider=str(payload.get("provider") or "gemini"),
+        api_key=payload.get("api_key"),
+        base_url=payload.get("base_url"),
+        credential_name=payload.get("credential") or payload.get("name"),
+    )
+    return JSONResponse(res, headers=_cors_headers())
+
+
+@mcp.custom_route("/agent/profile", methods=["POST", "PUT", "OPTIONS"])
+async def agent_profile_route(request):
+    """Switch active preset, provider account, model, fallback model, and RPM limit without restart."""
+    from starlette.responses import Response
+    from penpot_mcp.agent_gateway import agent_gateway
+
+    if request.method == "OPTIONS":
+        return Response(status_code=204, headers=_cors_headers())
+    try:
+        payload = await request.json()
+    except Exception:
+        return JSONResponse(
+            {"status": "ERROR", "error": "Invalid JSON body."},
+            status_code=400,
+            headers=_cors_headers(),
+        )
+    if not isinstance(payload, dict):
+        return JSONResponse(
+            {"status": "ERROR", "error": "JSON body must be an object."},
+            status_code=400,
+            headers=_cors_headers(),
+        )
+    prof = agent_gateway.update_active_profile(
+        preset=payload.get("preset"),
+        account=payload.get("account") or payload.get("credential"),
+        provider=payload.get("provider"),
+        model=payload.get("model"),
+        fallback_model=payload.get("fallback_model"),
+        rpm=payload.get("rpm"),
+    )
+    return JSONResponse(
+        {
+            "status": "ok",
+            "active_profile": prof,
+            "routes": agent_gateway.get_status()["routes"],
+        },
+        headers=_cors_headers(),
+    )
+
+
+@mcp.custom_route("/agent/instructions", methods=["POST", "PUT", "OPTIONS"])
+async def agent_instructions_route(request):
+    """Save or reset the versioned agent instruction addendum (Vanguard Control AgentsTab)."""
+    from starlette.responses import Response
+    from penpot_mcp.agent_gateway import agent_gateway
+
+    if request.method == "OPTIONS":
+        return Response(status_code=204, headers=_cors_headers())
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    inst = agent_gateway.update_agent_instructions(
+        op=str(payload.get("op") or "save"),
+        addendum=str(payload.get("addendum") or payload.get("text") or ""),
+        note=str(payload.get("note") or ""),
+    )
+    return JSONResponse({"status": "ok", "agent_instructions": inst}, headers=_cors_headers())
+
+
+@mcp.custom_route("/plugin/embed.js", methods=["GET", "OPTIONS"])
+async def plugin_embed_js(request):
+    """Serve a 1-click floating launcher script that docks Penpot AI Studio inside any Penpot workspace tab."""
+    from starlette.responses import Response
+
+    if request.method == "OPTIONS":
+        return Response(status_code=204, headers=_cors_headers())
+    host_header = request.headers.get("host", f"localhost:{settings.mcp_port}")
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme or "http")
+    origin = f"{scheme}://{host_header}"
+    js_code = f"""(function() {{
+  const ORIGIN = {json.dumps(origin)};
+  const params = new URLSearchParams(window.location.search || window.location.hash.split('?')[1] || '');
+  const fileId = params.get('file-id') || '';
+  const pageId = params.get('page-id') || '';
+  const existingDock = document.getElementById('penpot-ai-studio-dock');
+  const existingFab = document.getElementById('penpot-ai-studio-fab');
+  if (existingDock) existingDock.remove();
+  if (existingFab) existingFab.remove();
+
+  const dock = document.createElement('div');
+  dock.id = 'penpot-ai-studio-dock';
+  dock.style.cssText = 'position:fixed; right:18px; bottom:70px; width:430px; height:670px; z-index:99999; border-radius:14px; overflow:hidden; box-shadow:0 24px 60px rgba(0,0,0,0.65), 0 0 0 1px rgba(99,102,241,0.55); background:#090d16; transition:opacity 0.2s ease, transform 0.2s ease;';
+  const iframe = document.createElement('iframe');
+  iframe.id = 'penpot-ai-studio-iframe';
+  iframe.src = ORIGIN + '/plugin/ui.html?file_id=' + encodeURIComponent(fileId) + '&page_id=' + encodeURIComponent(pageId);
+  iframe.style.cssText = 'width:100%; height:100%; border:none;';
+  dock.appendChild(iframe);
+  document.body.appendChild(dock);
+
+  const fab = document.createElement('button');
+  fab.id = 'penpot-ai-studio-fab';
+  fab.type = 'button';
+  fab.innerHTML = '🤖 Penpot AI Studio';
+  fab.style.cssText = 'position:fixed; right:18px; bottom:18px; z-index:100000; background:linear-gradient(135deg,#6366f1,#0ea5e9); color:#fff; border:none; border-radius:999px; padding:10px 16px; font-family:Inter,sans-serif; font-weight:700; font-size:12.5px; cursor:pointer; box-shadow:0 10px 25px rgba(99,102,241,0.45);';
+  let open = true;
+  fab.onclick = function() {{
+    open = !open;
+    dock.style.display = open ? 'block' : 'none';
+  }};
+  document.body.appendChild(fab);
+}})();
+"""
+    return Response(content=js_code, media_type="application/javascript", headers=_cors_headers())
 
 
 # ═══════════════════════════════════════════════════════════════

@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Penpot AI Studio — SDK Agent Pipeline</title>
   <style>
     :root {
@@ -33,6 +33,7 @@
       flex-direction: column;
       overflow: hidden;
       font-size: 13px;
+      position: relative;
     }
     /* Top Header Bar */
     .header {
@@ -61,7 +62,7 @@
       width: 22px;
       height: 22px;
       border-radius: 6px;
-      background: linear-gradient(135deg, var(--accent), var(--emerald));
+      background: linear-gradient(135deg, var(--accent) 0%, #0ea5e9 100%);
       display: inline-flex;
       align-items: center;
       justify-content: center;
@@ -78,22 +79,25 @@
       font-size: 11px;
       font-weight: 600;
       background: rgba(16, 185, 129, 0.14);
-      color: var(--emerald);
+      color: #6ee7b7;
       border: 1px solid rgba(16, 185, 129, 0.35);
     }
     .conn-pill.offline {
-      background: rgba(245, 158, 11, 0.14);
-      color: var(--amber);
-      border-color: rgba(245, 158, 11, 0.35);
+      background: rgba(245, 158, 11, 0.15);
+      color: #fcd34d;
+      border-color: rgba(245, 158, 11, 0.4);
     }
     .dot {
       width: 7px;
       height: 7px;
       border-radius: 50%;
-      background: currentColor;
-      box-shadow: 0 0 6px currentColor;
+      background: var(--emerald);
+      box-shadow: 0 0 8px var(--emerald);
     }
-    /* Context Telemetry Bar */
+    .conn-pill.offline .dot {
+      background: var(--amber);
+      box-shadow: none;
+    }
     .context-bar {
       display: flex;
       align-items: center;
@@ -105,33 +109,44 @@
     .ctx-badges {
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 5px;
       flex-wrap: wrap;
     }
     .ctx-tag {
       background: var(--bg-2);
       border: 1px solid var(--border);
       padding: 2px 7px;
-      border-radius: 6px;
-      color: var(--text-0);
+      border-radius: 5px;
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       font-size: 10.5px;
+      color: #cbd5e1;
     }
-    .sync-btn {
-      background: transparent;
-      border: 1px solid var(--border);
-      color: var(--text-1);
-      border-radius: 6px;
-      padding: 2px 7px;
-      font-size: 10.5px;
-      cursor: pointer;
-      transition: all 0.15s ease;
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 5px;
     }
-    .sync-btn:hover {
+    .sync-btn, .cfg-btn {
+      background: var(--bg-2);
       color: var(--text-0);
-      border-color: var(--sky);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      padding: 3px 8px;
+      font-size: 10.5px;
+      font-weight: 600;
+      cursor: pointer;
     }
-    /* Quick Actions Strip (Figma AI Make Designs style) */
+    .cfg-btn {
+      background: rgba(99, 102, 241, 0.18);
+      border-color: rgba(99, 102, 241, 0.5);
+      color: #c7d2fe;
+    }
+    .sync-btn:hover, .cfg-btn:hover {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: #fff;
+    }
+    /* Quick Actions Strip */
     .quick-strip {
       padding: 8px 12px;
       background: var(--bg-1);
@@ -142,11 +157,10 @@
       scrollbar-width: none;
     }
     .quick-chip {
-      flex-shrink: 0;
       background: rgba(99, 102, 241, 0.12);
-      border: 1px solid rgba(99, 102, 241, 0.35);
       color: #c7d2fe;
-      padding: 5px 10px;
+      border: 1px solid rgba(99, 102, 241, 0.35);
+      padding: 4px 10px;
       border-radius: 999px;
       font-size: 11.5px;
       font-weight: 600;
@@ -259,7 +273,7 @@
       height: 54px;
       outline: none;
     }
-    textarea:focus {
+    textarea:focus, input:focus, select:focus {
       border-color: var(--accent);
     }
     .send-btn {
@@ -281,6 +295,223 @@
       opacity: 0.55;
       cursor: wait;
     }
+
+    /* Config Drawer (Vanguard Control AI Gateway Module) */
+    .config-drawer {
+      position: absolute;
+      inset: 0;
+      background: var(--bg-0);
+      z-index: 50;
+      display: none;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .config-drawer.open {
+      display: flex;
+    }
+    .cfg-header {
+      padding: 12px 14px;
+      background: var(--bg-1);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .cfg-title {
+      font-weight: 700;
+      font-size: 13.5px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .cfg-close {
+      background: var(--bg-2);
+      color: var(--text-0);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .cfg-tabs {
+      display: flex;
+      background: var(--bg-1);
+      border-bottom: 1px solid var(--border);
+      padding: 0 10px;
+      gap: 4px;
+    }
+    .cfg-tab {
+      background: transparent;
+      color: var(--text-1);
+      border: none;
+      border-bottom: 2px solid transparent;
+      padding: 8px 10px;
+      font-size: 11.5px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .cfg-tab.active {
+      color: #fff;
+      border-bottom-color: var(--accent);
+    }
+    .cfg-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .cfg-pane {
+      display: none;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .cfg-pane.active {
+      display: flex;
+    }
+    .cfg-card {
+      background: var(--bg-1);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .cfg-card h4 {
+      font-size: 12px;
+      font-weight: 700;
+      color: #e2e8f0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .cfg-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .field label {
+      font-size: 10.5px;
+      color: var(--text-1);
+      font-weight: 600;
+    }
+    .field input, .field select, .field textarea {
+      background: var(--bg-0);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text-0);
+      padding: 6px 8px;
+      font-size: 11.5px;
+      font-family: inherit;
+      outline: none;
+    }
+    .field textarea {
+      height: 68px;
+    }
+    .preset-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .preset-pill {
+      background: var(--bg-2);
+      border: 1px solid var(--border);
+      color: var(--text-1);
+      border-radius: 7px;
+      padding: 5px 9px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .preset-pill.active {
+      background: rgba(99, 102, 241, 0.22);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .btn-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .btn-primary, .btn-secondary {
+      border-radius: 6px;
+      padding: 6px 11px;
+      font-size: 11.5px;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid transparent;
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+    }
+    .btn-primary:hover {
+      background: var(--accent-hover);
+    }
+    .btn-secondary {
+      background: var(--bg-2);
+      color: #e2e8f0;
+      border-color: var(--border);
+    }
+    .btn-secondary:hover {
+      border-color: var(--accent);
+    }
+    .cred-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 7px 9px;
+      background: var(--bg-0);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 11px;
+    }
+    .cred-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .cred-name {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-weight: 700;
+      color: #f8fafc;
+    }
+    .cred-sub {
+      font-size: 10px;
+      color: var(--text-1);
+    }
+    .status-toast {
+      font-size: 11px;
+      padding: 6px 9px;
+      border-radius: 6px;
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid rgba(16, 185, 129, 0.4);
+      color: #6ee7b7;
+      display: none;
+    }
+    .status-toast.show {
+      display: block;
+    }
+    .code-snippet {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 10.5px;
+      background: var(--bg-0);
+      border: 1px solid var(--border);
+      padding: 6px 8px;
+      border-radius: 6px;
+      color: var(--sky);
+      word-break: break-all;
+    }
   </style>
 </head>
 <body>
@@ -301,7 +532,194 @@
         <span id="canvas-tag" class="ctx-tag">Canvas: Auto</span>
         <span id="selection-tag" class="ctx-tag">0 selected</span>
       </div>
-      <button id="sync-btn" class="sync-btn" type="button" title="Refresh Canvas & Gateway Status">Sync</button>
+      <div class="header-actions">
+        <button id="config-btn" class="cfg-btn" type="button" title="Configurar Gateway, Agentes y API Keys">⚙️ Config</button>
+        <button id="sync-btn" class="sync-btn" type="button" title="Refresh Canvas & Gateway Status">Sync</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Vanguard Control AI Gateway & Agent Configuration Drawer -->
+  <div id="config-drawer" class="config-drawer" role="dialog" aria-label="Configuración de Gateway y Agentes">
+    <div class="cfg-header">
+      <div class="cfg-title">
+        <span>⚙️ AI Gateway & Agentes</span>
+        <span class="ctx-tag">Vanguard Control Module</span>
+      </div>
+      <button id="cfg-close-btn" class="cfg-close" type="button">✕ Volver al Chat</button>
+    </div>
+
+    <div class="cfg-tabs" role="tablist">
+      <button class="cfg-tab active" data-tab="tab-routing" type="button">1. Agente / Perfil</button>
+      <button class="cfg-tab" data-tab="tab-providers" type="button">2. API Keys / Proveedores</button>
+      <button class="cfg-tab" data-tab="tab-instructions" type="button">3. Instrucciones & Invocación</button>
+    </div>
+
+    <div class="cfg-body">
+      <div id="cfg-toast" class="status-toast" role="status"></div>
+
+      <!-- TAB 1: Routing & Active Agent Profile -->
+      <div id="tab-routing" class="cfg-pane active">
+        <div class="cfg-card">
+          <h4>Presets de Operación (Cambio en Caliente)</h4>
+          <div id="preset-pills" class="preset-pills">
+            <button type="button" class="preset-pill active" data-preset="auto">Auto (Cloud + SDD)</button>
+            <button type="button" class="preset-pill" data-preset="demo-free">Gemini Free</button>
+            <button type="button" class="preset-pill" data-preset="paid">Paid Pro (Claude / GPT / Gemini)</button>
+            <button type="button" class="preset-pill" data-preset="local">Local Ollama</button>
+            <button type="button" class="preset-pill" data-preset="offline">Offline Determinista</button>
+          </div>
+        </div>
+
+        <div class="cfg-card">
+          <h4>Enrutamiento del Agente Activo</h4>
+          <div class="cfg-grid">
+            <div class="field">
+              <label for="cfg-account">Perfil / Cuenta</label>
+              <select id="cfg-account"></select>
+            </div>
+            <div class="field">
+              <label for="cfg-provider">Proveedor</label>
+              <select id="cfg-provider">
+                <option value="gemini">Google Gemini (AI Studio)</option>
+                <option value="anthropic">Anthropic (Claude)</option>
+                <option value="openai">OpenAI (ChatGPT)</option>
+                <option value="deepseek">DeepSeek</option>
+                <option value="openai_compatible">OpenAI-Compatible</option>
+                <option value="local">Local Server (Ollama)</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="cfg-model">Modelo Principal</label>
+              <input id="cfg-model" type="text" list="cfg-model-list" placeholder="ej. claude-sonnet-4-5, gpt-4o, gemini-3.5-flash-lite" />
+              <datalist id="cfg-model-list">
+                <option value="gemini-3.5-flash-lite"></option>
+                <option value="gemini-2.5-flash"></option>
+                <option value="gemini-2.5-pro"></option>
+                <option value="claude-sonnet-4-5"></option>
+                <option value="claude-3-5-haiku-latest"></option>
+                <option value="claude-opus-4-5"></option>
+                <option value="gpt-4o"></option>
+                <option value="gpt-4o-mini"></option>
+                <option value="o3-mini"></option>
+                <option value="deepseek-chat"></option>
+                <option value="gemma4:e2b"></option>
+              </datalist>
+            </div>
+            <div class="field">
+              <label for="cfg-fallback">Modelo Fallback</label>
+              <input id="cfg-fallback" type="text" placeholder="ej. gemini-2.5-flash" />
+            </div>
+          </div>
+          <div class="field">
+            <label for="cfg-rpm">Límite RPM (Peticiones / minuto)</label>
+            <input id="cfg-rpm" type="number" min="1" max="1000" value="15" />
+          </div>
+          <div class="btn-row">
+            <button id="save-profile-btn" class="btn-primary" type="button">💾 Guardar y Activar Perfil</button>
+          </div>
+        </div>
+
+        <div class="cfg-card">
+          <h4>Cadena de Failover Activa</h4>
+          <div id="route-chain-box" class="code-snippet">Cargando cadena...</div>
+        </div>
+      </div>
+
+      <!-- TAB 2: Providers & Write-Only API Keys -->
+      <div id="tab-providers" class="cfg-pane">
+        <div class="cfg-card">
+          <h4>Perfiles Guardados (Write-Only Keys · Solo últimos 4 dígitos)</h4>
+          <div id="credentials-list" style="display:flex; flex-direction:column; gap:6px;"></div>
+        </div>
+
+        <div class="cfg-card">
+          <h4>Añadir o Reemplazar API Key / Proveedor</h4>
+          <div class="cfg-grid">
+            <div class="field">
+              <label for="prov-name">Nombre del Perfil</label>
+              <input id="prov-name" type="text" placeholder="ej. claude-main, openai-pro, google-primary" />
+            </div>
+            <div class="field">
+              <label for="prov-type">Proveedor</label>
+              <select id="prov-type">
+                <option value="gemini">Google Gemini (AI Studio)</option>
+                <option value="anthropic">Anthropic (Claude)</option>
+                <option value="openai">OpenAI (ChatGPT)</option>
+                <option value="deepseek">DeepSeek</option>
+                <option value="openai_compatible">OpenAI-Compatible</option>
+                <option value="local">Local Server (Ollama)</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="prov-key">API Key (Write-Only)</label>
+              <input id="prov-key" type="password" autocomplete="new-password" placeholder="Pega tu nueva API Key aquí..." />
+            </div>
+            <div class="field">
+              <label for="prov-model">Modelo para este Perfil</label>
+              <input id="prov-model" type="text" value="gemini-3.5-flash-lite" />
+            </div>
+            <div class="field">
+              <label for="prov-purpose">Rol en Failover</label>
+              <select id="prov-purpose">
+                <option value="primary">Primary (Usar primero)</option>
+                <option value="backup">Backup (Failover automático)</option>
+                <option value="local">Local Fallback</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="prov-tier">Tier</label>
+              <select id="prov-tier">
+                <option value="free">Free Tier (RPM limitado)</option>
+                <option value="paid">Paid (Por uso)</option>
+              </select>
+            </div>
+          </div>
+          <div class="field">
+            <label for="prov-baseurl">Base URL (Opcional · automático por proveedor)</label>
+            <input id="prov-baseurl" type="text" placeholder="https://generativelanguage.googleapis.com" />
+          </div>
+          <div class="btn-row">
+            <button id="test-key-btn" class="btn-secondary" type="button">🧪 Probar Key y Listar Modelos</button>
+            <button id="save-key-btn" class="btn-primary" type="button">🔑 Guardar / Reemplazar Key y Activar</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 3: Agent Instructions Addendum & Penpot Invocation -->
+      <div id="tab-instructions" class="cfg-pane">
+        <div class="cfg-card">
+          <h4>
+            <span>Instrucciones del Agente (Addendum Versionado)</span>
+            <span id="inst-ver-badge" class="ctx-tag">v1</span>
+          </h4>
+          <div class="field">
+            <label for="inst-addendum">Reglas adicionales sobre la instrucción base (ej. paleta de marca, grillas, tipografía)</label>
+            <textarea id="inst-addendum" placeholder="Ej: Usa siempre fondo #0F172A, acento #6366F1, radio de borde 16px y textos en español..."></textarea>
+          </div>
+          <div class="field">
+            <label for="inst-note">Nota de versión (auditoría)</label>
+            <input id="inst-note" type="text" placeholder="Ej: Reglas de diseño corporativo oscuro" />
+          </div>
+          <div class="btn-row">
+            <button id="save-inst-btn" class="btn-primary" type="button">💾 Guardar Addendum</button>
+            <button id="reset-inst-btn" class="btn-secondary" type="button">↺ Reset a Instrucción Base</button>
+            <button id="reset-breakers-btn" class="btn-secondary" type="button">⚡ Reset Circuit Breakers</button>
+          </div>
+        </div>
+
+        <div class="cfg-card">
+          <h4>Cómo Invocar Penpot AI Studio en Penpot</h4>
+          <div class="field">
+            <label>Opción A — Gestor Nativo de Plugins de Penpot (Plugins -> Manage Plugins):</label>
+            <div id="manifest-url-box" class="code-snippet">http://localhost:8787/plugin/manifest.json</div>
+          </div>
+          <div class="field">
+            <label>Opción B — Botón Flotante 1-Clic en Consola / Bookmarklet sobre Penpot (:9001):</label>
+            <div id="embed-script-box" class="code-snippet">import('http://localhost:8787/plugin/embed.js')</div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -321,7 +739,7 @@
         <span>v0.4.0</span>
       </div>
       <div>
-        Conectado al servidor <strong>Penpot MCP</strong> (14 sub-tools + <code>playbook_run</code> Code Mode). Selecciona un chip rápido o escribe qué deseas diseñar en el lienzo.
+        Conectado al servidor <strong>Penpot MCP</strong> (14 sub-tools + <code>playbook_run</code> Code Mode). Usa <strong>⚙️ Config</strong> para cambiar entre <strong>Gemini, Claude, ChatGPT u Ollama</strong> o reemplazar tus API keys.
       </div>
     </div>
   </div>
@@ -344,22 +762,42 @@
     const canvasTag = document.getElementById("canvas-tag");
     const selectionTag = document.getElementById("selection-tag");
     const syncBtn = document.getElementById("sync-btn");
+    const configBtn = document.getElementById("config-btn");
+    const configDrawer = document.getElementById("config-drawer");
+    const cfgCloseBtn = document.getElementById("cfg-close-btn");
+    const cfgToast = document.getElementById("cfg-toast");
     const chatFeed = document.getElementById("chat-feed");
     const chatForm = document.getElementById("chat-form");
     const promptInput = document.getElementById("prompt-input");
     const sendBtn = document.getElementById("send-btn");
+
+    const PROVIDER_DEFAULTS = {
+      gemini: { model: "gemini-3.5-flash-lite", base: "https://generativelanguage.googleapis.com", tier: "free" },
+      anthropic: { model: "claude-sonnet-4-5", base: "https://api.anthropic.com/v1", tier: "paid" },
+      openai: { model: "gpt-4o", base: "https://api.openai.com/v1", tier: "paid" },
+      deepseek: { model: "deepseek-chat", base: "https://api.deepseek.com/v1", tier: "paid" },
+      openai_compatible: { model: "gpt-4o-mini", base: "https://api.openai.com/v1", tier: "paid" },
+      local: { model: "gemma4:e2b", base: "http://host.docker.internal:11434/v1", tier: "free" },
+    };
 
     const urlParams = new URLSearchParams(window.location.search);
     let activeFileId = urlParams.get("file_id") || null;
     let activePageId = urlParams.get("page_id") || null;
     let ws = null;
     let chatHistory = [];
+    let gatewayConfigCache = null;
     let latestPluginContext = {
       ids: [],
       selection: [],
       file_id: activeFileId,
       page_id: activePageId,
     };
+
+    function showToast(msg) {
+      cfgToast.textContent = msg;
+      cfgToast.classList.add("show");
+      setTimeout(() => cfgToast.classList.remove("show"), 4000);
+    }
 
     function setConnState(online, label) {
       connPill.classList.toggle("offline", !online);
@@ -411,9 +849,9 @@
         const res = await fetch("/agent/status");
         if (!res.ok) throw new Error("Status check failed");
         const st = await res.json();
-        const servingModel = (st.serving && st.serving.model) || st.default_model || "gemini-3.5-flash-lite";
-        const keyBadge = st.has_primary_key ? "Cloud+SDD" : "SDD";
-        modelTag.textContent = `${servingModel} (${keyBadge})`;
+        const servingModel = st.default_model || (st.serving && st.serving.model) || "gemini-3.5-flash-lite";
+        const activeProv = st.active_provider || (st.serving && st.serving.provider) || "gemini";
+        modelTag.textContent = `${activeProv}:${servingModel}`;
         if (st.resolved_canvas) {
           updateContextBadges(st.resolved_canvas);
         }
@@ -422,6 +860,261 @@
         setConnState(false, "Reconnecting...");
       }
     }
+
+    async function loadGatewayConfig() {
+      try {
+        const res = await fetch("/agent/config");
+        if (!res.ok) return;
+        const cfg = await res.json();
+        gatewayConfigCache = cfg;
+        const prof = cfg.active_profile || {};
+
+        // Preset pills
+        document.querySelectorAll(".preset-pill").forEach((btn) => {
+          btn.classList.toggle("active", btn.getAttribute("data-preset") === (prof.preset || "auto"));
+        });
+
+        // Account select
+        const accSelect = document.getElementById("cfg-account");
+        accSelect.innerHTML = "";
+        const creds = cfg.credentials || [];
+        for (const c of creds) {
+          const opt = document.createElement("option");
+          opt.value = c.credential;
+          opt.textContent = `${c.credential} (${c.provider} · ${c.key_last4 ? "…" + c.key_last4 : "no-key"})`;
+          accSelect.appendChild(opt);
+        }
+        if (prof.account) accSelect.value = prof.account;
+        document.getElementById("cfg-provider").value = prof.provider || "gemini";
+        document.getElementById("cfg-model").value = prof.model || "gemini-3.5-flash-lite";
+        document.getElementById("cfg-fallback").value = prof.fallback_model || "";
+        document.getElementById("cfg-rpm").value = prof.rpm || 15;
+
+        // Route chain summary
+        const chainStr = (cfg.routes || [])
+          .map((r) => `${r.tier}:${r.account}[${(r.models || []).join(",")}]`)
+          .join(" → ");
+        document.getElementById("route-chain-box").textContent = chainStr || "sdd-deterministic";
+
+        // Credentials list in Tab 2
+        const listBox = document.getElementById("credentials-list");
+        listBox.innerHTML = "";
+        for (const c of creds) {
+          const row = document.createElement("div");
+          row.className = "cred-item";
+          row.innerHTML = `
+            <div class="cred-meta">
+              <span class="cred-name">${c.credential} <span class="ctx-tag">${c.provider}</span> <span class="ctx-tag">${c.tier}</span></span>
+              <span class="cred-sub">Key: ${c.key_last4 ? "…" + c.key_last4 : "local"} · Modelos: ${(c.models || []).slice(0, 2).join(", ")}</span>
+            </div>
+            <div class="btn-row">
+              <button type="button" class="btn-secondary btn-replace-key" data-cred="${c.credential}" data-prov="${c.provider}" data-model="${(c.models || [])[0] || ""}" data-base="${c.base_url || ""}">Reemplazar Key</button>
+              <button type="button" class="btn-primary btn-use-cred" data-cred="${c.credential}" data-prov="${c.provider}" data-model="${(c.models || [])[0] || ""}">Usar</button>
+            </div>
+          `;
+          listBox.appendChild(row);
+        }
+
+        listBox.querySelectorAll(".btn-replace-key").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            document.getElementById("prov-name").value = btn.getAttribute("data-cred") || "";
+            document.getElementById("prov-type").value = btn.getAttribute("data-prov") || "gemini";
+            document.getElementById("prov-model").value = btn.getAttribute("data-model") || "";
+            document.getElementById("prov-baseurl").value = btn.getAttribute("data-base") || "";
+            document.getElementById("prov-key").focus();
+            showToast(`Editando '${btn.getAttribute("data-cred")}': pega la nueva API Key y pulsa Guardar.`);
+          });
+        });
+
+        listBox.querySelectorAll(".btn-use-cred").forEach((btn) => {
+          btn.addEventListener("click", async () => {
+            const credName = btn.getAttribute("data-cred");
+            const provName = btn.getAttribute("data-prov");
+            const modName = btn.getAttribute("data-model");
+            await fetch("/agent/profile", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ account: credName, provider: provName, model: modName }),
+            });
+            await loadGatewayConfig();
+            await refreshGatewayStatus();
+            showToast(`Agente activo cambiado a ${credName} (${provName}:${modName})`);
+          });
+        });
+
+        // Instructions Tab
+        const inst = cfg.agent_instructions || {};
+        document.getElementById("inst-ver-badge").textContent = `v${inst.version || 1}`;
+        document.getElementById("inst-addendum").value = inst.addendum || "";
+      } catch (_err) {}
+    }
+
+    // Drawer open / close & tabs
+    configBtn.addEventListener("click", () => {
+      configDrawer.classList.add("open");
+      loadGatewayConfig();
+    });
+    cfgCloseBtn.addEventListener("click", () => {
+      configDrawer.classList.remove("open");
+    });
+    document.querySelectorAll(".cfg-tab").forEach((tabBtn) => {
+      tabBtn.addEventListener("click", () => {
+        document.querySelectorAll(".cfg-tab").forEach((b) => b.classList.remove("active"));
+        document.querySelectorAll(".cfg-pane").forEach((p) => p.classList.remove("active"));
+        tabBtn.classList.add("active");
+        const pane = document.getElementById(tabBtn.getAttribute("data-tab"));
+        if (pane) pane.classList.add("active");
+      });
+    });
+
+    // Preset pill selection
+    document.querySelectorAll(".preset-pill").forEach((pill) => {
+      pill.addEventListener("click", async () => {
+        const preset = pill.getAttribute("data-preset");
+        await fetch("/agent/profile", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ preset }),
+        });
+        await loadGatewayConfig();
+        await refreshGatewayStatus();
+        showToast(`Preset '${preset}' activado inmediatamente.`);
+      });
+    });
+
+    // When changing account in Tab 1, sync provider & default model
+    document.getElementById("cfg-account").addEventListener("change", (e) => {
+      const val = e.target.value;
+      if (!gatewayConfigCache) return;
+      const found = (gatewayConfigCache.credentials || []).find((c) => c.credential === val);
+      if (found) {
+        document.getElementById("cfg-provider").value = found.provider;
+        if (found.models && found.models.length > 0) {
+          document.getElementById("cfg-model").value = found.models[0];
+        }
+      }
+    });
+
+    // When changing provider in Tab 1 or Tab 2, fill sensible defaults
+    document.getElementById("cfg-provider").addEventListener("change", (e) => {
+      const def = PROVIDER_DEFAULTS[e.target.value];
+      if (def) document.getElementById("cfg-model").value = def.model;
+    });
+    document.getElementById("prov-type").addEventListener("change", (e) => {
+      const def = PROVIDER_DEFAULTS[e.target.value];
+      if (def) {
+        document.getElementById("prov-model").value = def.model;
+        document.getElementById("prov-baseurl").value = def.base;
+        document.getElementById("prov-tier").value = def.tier;
+      }
+    });
+
+    // Save Active Profile button
+    document.getElementById("save-profile-btn").addEventListener("click", async () => {
+      const payload = {
+        account: document.getElementById("cfg-account").value,
+        provider: document.getElementById("cfg-provider").value,
+        model: document.getElementById("cfg-model").value.trim(),
+        fallback_model: document.getElementById("cfg-fallback").value.trim(),
+        rpm: Number(document.getElementById("cfg-rpm").value || 15),
+      };
+      const res = await fetch("/agent/profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        await loadGatewayConfig();
+        await refreshGatewayStatus();
+        showToast(`Perfil activo actualizado: ${payload.provider}:${payload.model}`);
+      }
+    });
+
+    // Test Provider Key button
+    document.getElementById("test-key-btn").addEventListener("click", async () => {
+      const payload = {
+        credential: document.getElementById("prov-name").value.trim(),
+        provider: document.getElementById("prov-type").value,
+        api_key: document.getElementById("prov-key").value.trim() || "KEEP",
+        base_url: document.getElementById("prov-baseurl").value.trim(),
+      };
+      showToast("Probando conexión con el proveedor...");
+      const res = await fetch("/agent/providers/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        if (Array.isArray(data.models) && data.models.length > 0) {
+          document.getElementById("prov-model").value = data.models[0];
+        }
+        showToast(`✅ Key válida para ${payload.provider} (${(data.models || []).length} modelos disponibles)`);
+      } else {
+        showToast(`⚠️ Respuesta del proveedor: ${data.error || "Verifica la API Key"}`);
+      }
+    });
+
+    // Save / Replace Provider Key button
+    document.getElementById("save-key-btn").addEventListener("click", async () => {
+      const payload = {
+        name: document.getElementById("prov-name").value.trim() || `${document.getElementById("prov-type").value}-main`,
+        provider: document.getElementById("prov-type").value,
+        api_key: document.getElementById("prov-key").value.trim(),
+        model: document.getElementById("prov-model").value.trim(),
+        purpose: document.getElementById("prov-purpose").value,
+        tier: document.getElementById("prov-tier").value,
+        base_url: document.getElementById("prov-baseurl").value.trim(),
+        activate: true,
+      };
+      const res = await fetch("/agent/providers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (res.ok && data.status === "ok") {
+        document.getElementById("prov-key").value = "";
+        await loadGatewayConfig();
+        await refreshGatewayStatus();
+        showToast(`🔑 Perfil '${data.credential.credential}' guardado (…${data.credential.key_last4 || "local"}) y activado.`);
+      } else {
+        showToast(`⚠️ Error: ${data.error || "No se pudo guardar"}`);
+      }
+    });
+
+    // Save / Reset Instructions & Breakers
+    document.getElementById("save-inst-btn").addEventListener("click", async () => {
+      const res = await fetch("/agent/instructions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          op: "save",
+          addendum: document.getElementById("inst-addendum").value,
+          note: document.getElementById("inst-note").value,
+        }),
+      });
+      if (res.ok) {
+        await loadGatewayConfig();
+        showToast("Addendum de instrucciones guardado y activo.");
+      }
+    });
+
+    document.getElementById("reset-inst-btn").addEventListener("click", async () => {
+      await fetch("/agent/instructions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ op: "reset", note: "Reset from UI" }),
+      });
+      await loadGatewayConfig();
+      showToast("Instrucciones restauradas a la base.");
+    });
+
+    document.getElementById("reset-breakers-btn").addEventListener("click", async () => {
+      const res = await fetch("/agent/breakers/reset", { method: "POST" });
+      const data = await res.json();
+      showToast(`Circuit breakers reiniciados (${data.reset_count || 0} rutas liberadas).`);
+    });
 
     async function connectWebSocket() {
       try {
@@ -452,7 +1145,6 @@
       }
     }
 
-    // Relay messages from Penpot plugin.js worker sandbox
     window.addEventListener("message", (event) => {
       const msg = event.data;
       if (!msg || typeof msg !== "object") return;
