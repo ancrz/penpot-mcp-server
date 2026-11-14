@@ -178,9 +178,16 @@ SUBTOOLS_CATALOG: dict[str, dict[str, Any]] = {
         "description": "Execute read-only SQL SELECT queries, inspect team webhooks, and retrieve authenticated user profile.",
     },
     "plugin": {
-        "domain": "Interactive Browser Plugin Bridge",
-        "actions": ["selection", "execute_script"],
-        "description": "Read live user canvas selection or execute JavaScript in the connected Penpot browser plugin.",
+        "domain": "Interactive Browser Plugin Bridge & Embedded AI Studio Gateway",
+        "actions": [
+            "selection",
+            "context",
+            "status",
+            "execute_script",
+            "focus",
+            "agent_chat",
+        ],
+        "description": "Read live user canvas selection/context, execute correlated JS in the Penpot browser plugin, focus shapes, or invoke the embedded SDK Agent Pipeline.",
     },
     "playbook_run": {
         "domain": "DAG Orchestration & Ephemeral Batch / Code Mode",
@@ -1472,49 +1479,77 @@ async def system(
 
 
 # ═══════════════════════════════════════════════════════════════
-# 13. plugin — Interactive Browser Plugin Bridge (2 actions)
+# 13. plugin — Interactive Browser Plugin Bridge & AI Gateway (6 actions)
 # ═══════════════════════════════════════════════════════════════
 
 
 async def plugin(
     action: str = "selection",
     script: str | None = None,
+    prompt: str | None = None,
+    quick_action: str | None = None,
+    file_id: str | None = None,
+    page_id: str | None = None,
+    shape_ids: list[str] | None = None,
+    await_result: bool = True,
+    timeout: float = 12.0,
     verbosity: str = "summary",
     select_fields: list[str] | None = None,
     store_as: str | None = None,
     session_id: str | None = None,
 ) -> str:
-    """Branch toolset for live browser plugin selection and script execution.
+    """Branch toolset for live browser plugin selection, correlated JS evaluation, viewport focus, and AI Studio chat.
 
-    Route via action: 'selection' | 'execute_script' (or 'help').
+    Route via action: 'selection' | 'context' | 'status' | 'execute_script' | 'focus' | 'agent_chat' (or 'help').
     """
+    from dataclasses import asdict
+    from penpot_mcp.agent_gateway import agent_gateway
     from penpot_mcp.gateway import gateway
-    from penpot_mcp.ws_controller import ws_controller
 
     act = (action or "selection").strip().lower()
     tracker = RequestTelemetry("plugin", act)
-    valid = ["selection", "execute_script"]
+    valid = [
+        "selection",
+        "context",
+        "status",
+        "execute_script",
+        "focus",
+        "agent_chat",
+    ]
+
+    if act in ("help", "actions", "list_actions", "schema"):
+        return _invalid_action_response("plugin", act, valid, tracker, verbosity)
 
     try:
         if act in ("selection", "get_active_selection"):
-            if not gateway.is_interactive:
-                raw: dict[str, Any] = {
-                    "error": "No active Penpot Plugin connection found. The user must have the plugin open."
-                }
-            else:
-                raw = {"selected_shape_ids": gateway.active_selection}
+            raw: dict[str, Any] = await gateway.execute_intent("get_active_selection")
+        elif act in ("context", "get_live_context"):
+            raw = await gateway.execute_intent(
+                "get_live_context", file_id=file_id, page_id=page_id
+            )
+        elif act in ("status", "gateway_status"):
+            raw = agent_gateway.get_status()
         elif act in ("execute_script", "script"):
             if not script:
                 return _missing_param_response("plugin", act, ["script"], tracker, verbosity)
-            if not ws_controller.is_connected:
-                raw = {"error": "No active Penpot Plugin connection found."}
-            else:
-                ok = await ws_controller.send_command(script)
-                raw = (
-                    {"status": "OK", "message": "Script executed (or broadcasted) successfully."}
-                    if ok
-                    else {"error": "Failed to send script."}
-                )
+            raw = await gateway.execute_intent(
+                "execute_plugin_script",
+                script=script,
+                await_result=await_result,
+                timeout=timeout,
+            )
+        elif act in ("focus", "focus_shapes"):
+            raw = await gateway.execute_intent("focus_shapes", shape_ids=shape_ids)
+        elif act in ("agent_chat", "chat"):
+            if not prompt and not quick_action:
+                return _missing_param_response("plugin", act, ["prompt"], tracker, verbosity)
+            turn = await agent_gateway.chat(
+                prompt or quick_action or "",
+                file_id=file_id,
+                page_id=page_id,
+                quick_action=quick_action,
+            )
+            raw = asdict(turn)
         else:
             return _invalid_action_response("plugin", action, valid, tracker, verbosity)
 

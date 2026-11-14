@@ -1,144 +1,592 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Penpot MCP</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Penpot AI Studio — SDK Agent Pipeline</title>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg-0: #090d16;
+      --bg-1: #0f172a;
+      --bg-2: #1e293b;
+      --border: #334155;
+      --text-0: #f8fafc;
+      --text-1: #94a3b8;
+      --accent: #6366f1;
+      --accent-hover: #4f46e5;
+      --emerald: #10b981;
+      --sky: #38bdf8;
+      --amber: #f59e0b;
+      --danger: #ef4444;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: #1e1e1e;
-      color: #e0e0e0;
-      padding: 16px;
-    }
-    h2 {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg-0);
+      color: var(--text-0);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
       font-size: 13px;
-      font-weight: 600;
-      letter-spacing: 0.05em;
-      text-transform: uppercase;
-      color: #a0a0a0;
-      margin-bottom: 12px;
     }
-    .status-card {
+    /* Top Header Bar */
+    .header {
+      padding: 12px 14px 10px;
+      background: linear-gradient(180deg, rgba(30, 41, 59, 0.85) 0%, rgba(15, 23, 42, 0.95) 100%);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .header-top {
       display: flex;
       align-items: center;
-      gap: 10px;
-      background: #2a2a2a;
-      border-radius: 8px;
-      padding: 12px 14px;
-      margin-bottom: 14px;
-      border: 1px solid #333;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 700;
+      font-size: 13.5px;
+      letter-spacing: -0.01em;
+    }
+    .brand-badge {
+      width: 22px;
+      height: 22px;
+      border-radius: 6px;
+      background: linear-gradient(135deg, var(--accent), var(--emerald));
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 800;
+      color: #fff;
+    }
+    .conn-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 9px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      background: rgba(16, 185, 129, 0.14);
+      color: var(--emerald);
+      border: 1px solid rgba(16, 185, 129, 0.35);
+    }
+    .conn-pill.offline {
+      background: rgba(245, 158, 11, 0.14);
+      color: var(--amber);
+      border-color: rgba(245, 158, 11, 0.35);
     }
     .dot {
-      width: 10px;
-      height: 10px;
+      width: 7px;
+      height: 7px;
       border-radius: 50%;
-      background: #facc15;
-      flex-shrink: 0;
-      transition: background 0.3s;
+      background: currentColor;
+      box-shadow: 0 0 6px currentColor;
     }
-    .dot.connected    { background: #4ade80; box-shadow: 0 0 6px #4ade8066; }
-    .dot.disconnected { background: #f87171; }
-    .dot.connecting   { background: #facc15; }
-    #status-text { font-size: 13px; font-weight: 500; }
-    .hint { font-size: 11px; color: #666; line-height: 1.5; }
+    /* Context Telemetry Bar */
+    .context-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      font-size: 11px;
+      color: var(--text-1);
+    }
+    .ctx-badges {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .ctx-tag {
+      background: var(--bg-2);
+      border: 1px solid var(--border);
+      padding: 2px 7px;
+      border-radius: 6px;
+      color: var(--text-0);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 10.5px;
+    }
+    .sync-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-1);
+      border-radius: 6px;
+      padding: 2px 7px;
+      font-size: 10.5px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .sync-btn:hover {
+      color: var(--text-0);
+      border-color: var(--sky);
+    }
+    /* Quick Actions Strip (Figma AI Make Designs style) */
+    .quick-strip {
+      padding: 8px 12px;
+      background: var(--bg-1);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      gap: 6px;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .quick-chip {
+      flex-shrink: 0;
+      background: rgba(99, 102, 241, 0.12);
+      border: 1px solid rgba(99, 102, 241, 0.35);
+      color: #c7d2fe;
+      padding: 5px 10px;
+      border-radius: 999px;
+      font-size: 11.5px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      white-space: nowrap;
+    }
+    .quick-chip:hover {
+      background: var(--accent);
+      color: #ffffff;
+      border-color: var(--accent);
+    }
+    /* Chat & Artifact Feed */
+    .feed {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .msg {
+      padding: 10px 12px;
+      border-radius: 12px;
+      line-height: 1.45;
+      max-width: 95%;
+      word-break: break-word;
+    }
+    .msg.user {
+      align-self: flex-end;
+      background: var(--accent);
+      color: #ffffff;
+      border-bottom-right-radius: 4px;
+    }
+    .msg.assistant {
+      align-self: flex-start;
+      background: var(--bg-1);
+      border: 1px solid var(--border);
+      color: var(--text-0);
+      border-bottom-left-radius: 4px;
+      width: 100%;
+    }
+    .msg-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 10.5px;
+      color: var(--text-1);
+      margin-bottom: 5px;
+    }
+    .trace-list {
+      margin-top: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      border-top: 1px solid rgba(51, 65, 85, 0.6);
+      padding-top: 6px;
+    }
+    .trace-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid rgba(51, 65, 85, 0.8);
+      padding: 4px 8px;
+      border-radius: 6px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 10.5px;
+      color: var(--sky);
+    }
+    .shape-pills {
+      margin-top: 6px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+    }
+    .shape-pill {
+      background: rgba(16, 185, 129, 0.14);
+      border: 1px solid rgba(16, 185, 129, 0.4);
+      color: #6ee7b7;
+      border-radius: 6px;
+      padding: 2px 7px;
+      font-size: 10.5px;
+      cursor: pointer;
+    }
+    /* Composer Footer */
+    .composer {
+      padding: 10px 12px;
+      background: var(--bg-1);
+      border-top: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .composer-row {
+      display: flex;
+      gap: 8px;
+      align-items: flex-end;
+    }
+    textarea {
+      flex: 1;
+      background: var(--bg-0);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text-0);
+      padding: 8px 10px;
+      font-family: inherit;
+      font-size: 12.5px;
+      resize: none;
+      height: 54px;
+      outline: none;
+    }
+    textarea:focus {
+      border-color: var(--accent);
+    }
+    .send-btn {
+      background: var(--accent);
+      color: #ffffff;
+      border: none;
+      border-radius: 10px;
+      padding: 0 14px;
+      height: 54px;
+      font-weight: 700;
+      font-size: 12.5px;
+      cursor: pointer;
+      transition: background 0.15s ease;
+    }
+    .send-btn:hover:not(:disabled) {
+      background: var(--accent-hover);
+    }
+    .send-btn:disabled {
+      opacity: 0.55;
+      cursor: wait;
+    }
   </style>
 </head>
 <body>
-  <h2>Penpot MCP</h2>
-  <div class="status-card">
-    <div class="dot connecting" id="dot"></div>
-    <span id="status-text">Connecting...</span>
+  <div class="header">
+    <div class="header-top">
+      <div class="brand">
+        <span class="brand-badge">AI</span>
+        <span>Penpot AI Studio</span>
+      </div>
+      <div id="conn-pill" class="conn-pill">
+        <span class="dot"></span>
+        <span id="conn-text">Gateway Ready</span>
+      </div>
+    </div>
+    <div class="context-bar">
+      <div class="ctx-badges">
+        <span id="model-tag" class="ctx-tag">gemini-3.5-flash-lite</span>
+        <span id="canvas-tag" class="ctx-tag">Canvas: Auto</span>
+        <span id="selection-tag" class="ctx-tag">0 selected</span>
+      </div>
+      <button id="sync-btn" class="sync-btn" type="button" title="Refresh Canvas & Gateway Status">Sync</button>
+    </div>
   </div>
-  <p class="hint">
-    When connected, your AI assistant can read the active canvas selection
-    and execute design scripts via the Penpot Plugin API.
-  </p>
+
+  <div class="quick-strip" role="toolbar" aria-label="Quick AI Actions">
+    <button class="quick-chip" data-action="hero_card" data-prompt="Create a Hero Card component on the active page">+ Hero Card</button>
+    <button class="quick-chip" data-action="login_form" data-prompt="Create a modern SSO Login Form card">+ Login Form</button>
+    <button class="quick-chip" data-action="pricing_card" data-prompt="Create an Enterprise AI Pricing Card">+ Pricing Card</button>
+    <button class="quick-chip" data-action="navbar" data-prompt="Create a responsive Navigation Bar header">+ Navbar</button>
+    <button class="quick-chip" data-action="bind_tokens" data-prompt="Auto-bind library design tokens on the active page">Bind Tokens</button>
+    <button class="quick-chip" data-action="inspect_css" data-prompt="Extract CSS for the active selection or page shape">Inspect CSS</button>
+  </div>
+
+  <div id="chat-feed" class="feed" role="log" aria-live="polite">
+    <div class="msg assistant">
+      <div class="msg-meta">
+        <span>SDK Agent Pipeline · Hybrid Gateway</span>
+        <span>v0.4.0</span>
+      </div>
+      <div>
+        Conectado al servidor <strong>Penpot MCP</strong> (14 sub-tools + <code>playbook_run</code> Code Mode). Selecciona un chip rápido o escribe qué deseas diseñar en el lienzo.
+      </div>
+    </div>
+  </div>
+
+  <form id="chat-form" class="composer">
+    <div class="composer-row">
+      <textarea
+        id="prompt-input"
+        placeholder="Describe el componente o cambio en Penpot (ej. 'Crea una tarjeta Hero con botón verde')..."
+        aria-label="Prompt para Penpot AI Studio"
+      ></textarea>
+      <button id="send-btn" class="send-btn" type="submit">Generar</button>
+    </div>
+  </form>
 
   <script>
-    // ui.html runs in a normal browser iframe — has full WebSocket access.
-    // Bridge: MCP server <-> WebSocket <-> ui.html <-> postMessage <-> plugin.js
-    //
-    // Inbound  (server→plugin): WS message {type:"execute"} → parent.postMessage → plugin.js
-    // Outbound (plugin→server): plugin.js penpot.ui.sendMessage → window message → WS send
+    const connPill = document.getElementById("conn-pill");
+    const connText = document.getElementById("conn-text");
+    const modelTag = document.getElementById("model-tag");
+    const canvasTag = document.getElementById("canvas-tag");
+    const selectionTag = document.getElementById("selection-tag");
+    const syncBtn = document.getElementById("sync-btn");
+    const chatFeed = document.getElementById("chat-feed");
+    const chatForm = document.getElementById("chat-form");
+    const promptInput = document.getElementById("prompt-input");
+    const sendBtn = document.getElementById("send-btn");
 
-    var wsUrl = "ws://localhost:4402";
-    var socket = null;
-    var reconnectDelay = 1000;
+    const urlParams = new URLSearchParams(window.location.search);
+    let activeFileId = urlParams.get("file_id") || null;
+    let activePageId = urlParams.get("page_id") || null;
+    let ws = null;
+    let chatHistory = [];
+    let latestPluginContext = {
+      ids: [],
+      selection: [],
+      file_id: activeFileId,
+      page_id: activePageId,
+    };
 
-    function updateStatus(status) {
-      var dot  = document.getElementById("dot");
-      var text = document.getElementById("status-text");
-      if (status === "connected") {
-        dot.className = "dot connected";
-        text.textContent = "Connected to MCP Server";
-      } else {
-        dot.className = "dot disconnected";
-        text.textContent = "Not connected — retrying...";
-      }
+    function setConnState(online, label) {
+      connPill.classList.toggle("offline", !online);
+      connText.textContent = label;
     }
 
-    function connect() {
+    function updateContextBadges(ctx) {
+      if (!ctx) return;
+      if (ctx.file_id) activeFileId = ctx.file_id;
+      if (ctx.page_id) activePageId = ctx.page_id;
+      const fileLabel = ctx.file_name || (activeFileId ? activeFileId.slice(0, 8) : "Auto");
+      const pageLabel = ctx.page_name || (activePageId ? activePageId.slice(0, 8) : "Page 1");
+      canvasTag.textContent = `${fileLabel} · ${pageLabel}`;
+      const selCount = Array.isArray(ctx.ids)
+        ? ctx.ids.length
+        : Array.isArray(ctx.selected_shape_ids)
+        ? ctx.selected_shape_ids.length
+        : 0;
+      selectionTag.textContent = `${selCount} selected`;
+    }
+
+    async function pushHttpTelemetry(payload) {
       try {
-        socket = new WebSocket(wsUrl);
-      } catch (e) {
-        console.error("[Penpot MCP] WebSocket error:", e);
-        setTimeout(connect, reconnectDelay);
-        return;
-      }
-
-      socket.onopen = function () {
-        reconnectDelay = 1000;
-        updateStatus("connected");
-        console.log("[Penpot MCP] Connected to", wsUrl);
-      };
-
-      socket.onmessage = function (event) {
-        try {
-          var msg = JSON.parse(event.data);
-          // Forward execute commands to plugin.js worker via postMessage
-          if (msg.type === "execute") {
-            parent.postMessage(msg, "*");
+        const res = await fetch("/plugin/telemetry", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload || latestPluginContext),
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (Array.isArray(data.commands)) {
+          for (const cmd of data.commands) {
+            parent.postMessage(cmd, "*");
           }
-        } catch (e) {
-          console.error("[Penpot MCP] WS parse error:", e);
         }
-      };
-
-      socket.onclose = function () {
-        updateStatus("disconnected");
-        setTimeout(connect, reconnectDelay);
-        reconnectDelay = Math.min(reconnectDelay * 2, 30000);
-      };
-
-      socket.onerror = function () {
-        console.warn("[Penpot MCP] WS error — will reconnect");
-      };
+      } catch (_err) {}
     }
 
-    // Receive selectionchange / ack from plugin.js and forward to WebSocket server
-    window.addEventListener("message", function (event) {
-      var msg = event.data;
-      if (!msg || !msg.type) return;
-      if (msg.type === "selectionchange" || msg.type === "ack") {
-        if (socket && socket.readyState === WebSocket.OPEN) {
-          socket.send(JSON.stringify(msg));
+    async function refreshGatewayStatus() {
+      try {
+        parent.postMessage({ type: "get_context" }, "*");
+        await pushHttpTelemetry({
+          type: "telemetry",
+          file_id: activeFileId,
+          page_id: activePageId,
+          ids: latestPluginContext.ids || [],
+          selection: latestPluginContext.selection || [],
+        });
+        const res = await fetch("/agent/status");
+        if (!res.ok) throw new Error("Status check failed");
+        const st = await res.json();
+        const servingModel = (st.serving && st.serving.model) || st.default_model || "gemini-3.5-flash-lite";
+        const keyBadge = st.has_primary_key ? "Cloud+SDD" : "SDD";
+        modelTag.textContent = `${servingModel} (${keyBadge})`;
+        if (st.resolved_canvas) {
+          updateContextBadges(st.resolved_canvas);
         }
+        setConnState(true, ws && ws.readyState === WebSocket.OPEN ? "WS + AI Live" : "HTTP + AI Live");
+      } catch (_e) {
+        setConnState(false, "Reconnecting...");
+      }
+    }
+
+    async function connectWebSocket() {
+      try {
+        const cfgRes = await fetch("/plugin/config.json");
+        const cfg = await cfgRes.json();
+        const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+        const sameOriginWsUrl = `${proto}//${window.location.host}${cfg.same_origin_ws_path || "/plugin/ws"}`;
+        ws = new WebSocket(sameOriginWsUrl);
+
+        ws.onopen = () => {
+          setConnState(true, "WS + AI Live");
+          parent.postMessage({ type: "get_context" }, "*");
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const cmd = JSON.parse(event.data);
+            parent.postMessage(cmd, "*");
+          } catch (_e) {}
+        };
+
+        ws.onclose = () => {
+          refreshGatewayStatus();
+          setTimeout(connectWebSocket, 4000);
+        };
+      } catch (_err) {
+        refreshGatewayStatus();
+      }
+    }
+
+    // Relay messages from Penpot plugin.js worker sandbox
+    window.addEventListener("message", (event) => {
+      const msg = event.data;
+      if (!msg || typeof msg !== "object") return;
+      if (msg.type === "context" || msg.type === "selectionchange") {
+        latestPluginContext = {
+          ...latestPluginContext,
+          ...msg,
+        };
+        updateContextBadges(latestPluginContext);
+      }
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(msg));
+      } else {
+        pushHttpTelemetry(msg);
       }
     });
 
-    // Fetch dynamic WS URL from config endpoint, then connect
-    fetch("http://localhost:8787/plugin/config.json")
-      .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (cfg) {
-        if (cfg && cfg.ws_url) wsUrl = cfg.ws_url;
-        connect();
-      })
-      .catch(function () {
-        console.warn("[Penpot MCP] config.json unavailable, using default:", wsUrl);
-        connect();
+    function appendMessage(role, text, meta) {
+      const div = document.createElement("div");
+      div.className = `msg ${role}`;
+
+      if (role === "assistant" && meta) {
+        const metaRow = document.createElement("div");
+        metaRow.className = "msg-meta";
+        const providerSpan = document.createElement("span");
+        providerSpan.textContent = `${meta.provider_used || "gateway"} · ${meta.model_used || ""}`;
+        const latSpan = document.createElement("span");
+        latSpan.textContent = meta.latency_ms ? `${meta.latency_ms} ms` : "";
+        metaRow.appendChild(providerSpan);
+        metaRow.appendChild(latSpan);
+        div.appendChild(metaRow);
+      }
+
+      const bodyDiv = document.createElement("div");
+      bodyDiv.style.whiteSpace = "pre-wrap";
+      bodyDiv.textContent = text;
+      div.appendChild(bodyDiv);
+
+      if (meta && Array.isArray(meta.tool_trace) && meta.tool_trace.length > 0) {
+        const traceBox = document.createElement("div");
+        traceBox.className = "trace-list";
+        for (const t of meta.tool_trace) {
+          const item = document.createElement("div");
+          item.className = "trace-item";
+          item.innerHTML = `<span>⚡ ${t.tool}.${t.action}</span><span>${t.status} (${t.duration_ms || 0}ms)</span>`;
+          traceBox.appendChild(item);
+        }
+        div.appendChild(traceBox);
+      }
+
+      if (meta && Array.isArray(meta.created_shapes) && meta.created_shapes.length > 0) {
+        const pillsBox = document.createElement("div");
+        pillsBox.className = "shape-pills";
+        for (const s of meta.created_shapes.slice(0, 6)) {
+          const pill = document.createElement("button");
+          pill.type = "button";
+          pill.className = "shape-pill";
+          pill.textContent = `🎯 ${s.name || s.shape_id.slice(0, 8)}`;
+          pill.addEventListener("click", () => {
+            parent.postMessage({ type: "focus_shapes", shape_ids: [s.shape_id] }, "*");
+          });
+          pillsBox.appendChild(pill);
+        }
+        div.appendChild(pillsBox);
+      }
+
+      chatFeed.appendChild(div);
+      chatFeed.scrollTop = chatFeed.scrollHeight;
+    }
+
+    async function submitAgentTurn(promptText, quickAction) {
+      if (!promptText && !quickAction) return;
+      appendMessage("user", promptText || quickAction);
+      sendBtn.disabled = true;
+      sendBtn.textContent = "...";
+
+      try {
+        const res = await fetch("/agent/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            prompt: promptText,
+            quick_action: quickAction || null,
+            file_id: activeFileId,
+            page_id: activePageId,
+            history: chatHistory.slice(-6),
+          }),
+        });
+        const data = await res.json();
+        if (data.file_id) activeFileId = data.file_id;
+        if (data.page_id) activePageId = data.page_id;
+        updateContextBadges({ file_id: activeFileId, page_id: activePageId });
+
+        const reply = data.reply || data.error || "Completado.";
+        appendMessage("assistant", reply, data);
+        chatHistory.push({ role: "user", text: promptText || quickAction });
+        chatHistory.push({ role: "assistant", text: reply });
+      } catch (err) {
+        appendMessage("assistant", `Error de conexión con el Gateway: ${err}`);
+      } finally {
+        sendBtn.disabled = false;
+        sendBtn.textContent = "Generar";
+      }
+    }
+
+    chatForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const val = promptInput.value.trim();
+      if (!val) return;
+      promptInput.value = "";
+      submitAgentTurn(val, null);
+    });
+
+    promptInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        chatForm.requestSubmit();
+      }
+    });
+
+    document.querySelectorAll(".quick-chip").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const action = btn.getAttribute("data-action");
+        const promptText = btn.getAttribute("data-prompt") || action;
+        submitAgentTurn(promptText, action);
       });
+    });
+
+    syncBtn.addEventListener("click", () => {
+      refreshGatewayStatus();
+    });
+
+    connectWebSocket();
+    refreshGatewayStatus();
   </script>
 </body>
 </html>

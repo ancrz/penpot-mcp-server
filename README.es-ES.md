@@ -7,8 +7,8 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python 3.13+](https://img.shields.io/badge/Python-3.13+-yellow.svg)](https://python.org)
 [![MCP Protocol](https://img.shields.io/badge/MCP-2025--03--26-green.svg)](https://modelcontextprotocol.io)
-[![Version: 0.3.0](https://img.shields.io/badge/Version-0.3.0-purple.svg)](pyproject.toml)
-[![Tools: 14 Sub--Tools / 77 Actions](https://img.shields.io/badge/Tools-14_Sub--Tools_(77_Actions)-orange.svg)](TOOLS.md)
+[![Version: 0.4.0](https://img.shields.io/badge/Version-0.4.0-purple.svg)](pyproject.toml)
+[![Tools: 14 Sub--Tools / 81 Actions](https://img.shields.io/badge/Tools-14_Sub--Tools_(81_Actions)-orange.svg)](TOOLS.md)
 
 ---
 
@@ -31,16 +31,30 @@ Piensa en ello como el puente entre tu asistente de IA y tu herramienta de dise�
 
 ---
 
-## Hitos y Estado (v0.3.0)
+## Hitos y Estado (v0.4.0)
 
 ```mermaid
 flowchart LR
-    I["Intención: v0.3.0 Compresión AEP Sub-Tools, Code Mode y Protección SSRF"] --> M1["M1: planificado (Orchestrator) ✅"]
-    M1 --> M2["M2: implementado (Pragma) ✅"]
-    M2 --> M3["M3: verificado (Dokimos) ✅"]
-    M3 --> M4["M4: documentado (Graphos) ✅"]
-    M4 --> M5["M5: comprometido (Hermon) ✅"]
+    I["Intención: v0.4.0 PenpotGateway Híbrido, SDK Agent Pipeline y GUI Penpot AI Studio"] --> M1["M1: planificado (Archon + Graphos G1) ✅"]
+    M1 --> M2["M2: auditado (Ontos) ✅"]
+    M2 --> M3["M3: implementado (Pragma) ✅"]
+    M3 --> M4["M4: verificado (Dokimos + Playwright) ✅"]
+    M4 --> M5["M5: documentado (Graphos G2) ✅"]
+    M5 --> M6["M6: comprometido (Hermon) ✅"]
 ```
+
+---
+
+## Penpot AI Studio In-App y SDK Agent Pipeline Integrado (v0.4.0)
+
+`penpot-mcp-server` (`v0.4.0`) incorpora el **SDK Agent Pipeline (`PenpotAgentGateway`)** y el mini-frontend **Penpot AI Studio** (`http://localhost:8787/plugin/ui.html` / `/plugin/manifest.json`):
+- **Gateway IA Multi-Proveedor (`src/penpot_mcp/agent_gateway.py`)**: Adaptador nativo Gemini REST (`gemini-3.5-flash-lite`, `gemini-2.5-flash`) con backfill de `thoughtSignature`, traducción OpenAI/Ollama y Anthropic, failover con circuit-breakers (`primary -> backup -> local -> deterministic`) y síntesis de artefactos UI en 1 turno vía `playbook_run(action='code')` (`hero_card`, `login_form`, `pricing_card`, `navbar`).
+- **Puente Bidireccional Correlacionado (`src/penpot_mcp/ws_controller.py` y `gateway.py`)**: Soporte de `asyncio.Future` para `execute_script` y `request_context`, WebSocket same-origin (`/plugin/ws` en `:8787`), WebSocket standalone (`:4402`) y telemetría HTTP (`/plugin/telemetry`).
+- **Endpoints REST y WS**:
+  - `GET /agent/status` — Estado en vivo de proveedores, circuit breakers y telemetría del lienzo activo.
+  - `POST /agent/chat` — Ejecución de prompts en lenguaje natural y acciones rápidas directamente sobre el lienzo de Penpot.
+  - `POST /agent/breakers/reset` — Reinicio de circuit breakers.
+  - `WS /plugin/ws` y `POST /plugin/telemetry` — Canal bidireccional en vivo con el plugin de Penpot.
 
 ---
 

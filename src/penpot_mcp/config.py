@@ -39,15 +39,36 @@ class Settings(BaseSettings):
     mcp_host: str = "0.0.0.0"
     mcp_port: int = 8787
     mcp_log_level: str = "info"
-    mcp_allowed_hosts: list[str] = ["127.0.0.1", "localhost", "penpot-mcp"]
+    mcp_allowed_hosts: list[str] = [
+        "127.0.0.1",
+        "localhost",
+        "penpot-mcp",
+        "host.docker.internal",
+    ]
 
-    # WebSocket / Plugin channel (opt-in, localhost-bound, token + origin gated)
+    # WebSocket / Plugin channel (opt-in, token + origin gated)
     ws_enabled: bool = False
     ws_host: str = "127.0.0.1"
     ws_port: int = 4402
     ws_token: str = ""
     plugin_ws_url: str = "ws://localhost:4402"
     plugin_origin: str = "http://localhost:8787"
+
+    # SDK Agent Pipeline & AI Gateway (RE from sdk-agent-pipeline & vanguard-control)
+    penpot_agent_mode: str = "auto"
+    penpot_agent_model: str = "gemini-3.5-flash-lite"
+    penpot_agent_fallback_model: str = "gemini-2.5-flash"
+    google_api_key: str = ""
+    google_api_key_backup: str = ""
+    google_gemini_base_url: str = "https://generativelanguage.googleapis.com"
+    openai_api_key: str = ""
+    openai_base_url: str = "https://api.openai.com/v1"
+    anthropic_api_key: str = ""
+    anthropic_base_url: str = "https://api.anthropic.com/v1"
+    ollama_base_url: str = "http://localhost:11434/v1"
+    ollama_model: str = "gemma4:e2b"
+    penpot_agent_rpm: int = 15
+    penpot_agent_max_turns: int = 6
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
@@ -65,6 +86,15 @@ class Settings(BaseSettings):
     @property
     def has_credentials(self) -> bool:
         return bool(self.penpot_email and self.penpot_password)
+
+    @property
+    def has_llm_key(self) -> bool:
+        return bool(
+            self.google_api_key.strip()
+            or self.google_api_key_backup.strip()
+            or self.openai_api_key.strip()
+            or self.anthropic_api_key.strip()
+        )
 
 
 settings = Settings()

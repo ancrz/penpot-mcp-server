@@ -85,12 +85,12 @@ def test_settings_properties_and_backward_compatible_defaults() -> None:
         penpot_db_host="localhost",
         penpot_db_port=5432,
         penpot_db_name="penpot",
-    )
+    )  # type: ignore[call-arg]
     assert cfg.has_access_token is True
     assert cfg.has_credentials is False
     # Backward-compatible default is 'penpot' so existing .env files without PENPOT_DB_USER work
     assert cfg.penpot_db_user == "penpot"
-    assert cfg.penpot_mcp_version == "0.3.0"
+    assert cfg.penpot_mcp_version == "0.4.0"
     assert cfg.mcp_tool_mode == "compressed"
     assert cfg.ssrf_allow_private_media is False
     assert cfg.db_statement_timeout_ms == 30000
@@ -632,12 +632,197 @@ async def test_discover_and_polymorphic_subtools_and_code_mode_batch(
 def test_settings_ignores_extra_build_vars_and_exposes_versions() -> None:
     cfg = Settings(
         _env_file=None,
-        penpot_mcp_version="0.3.0",
+        penpot_mcp_version="0.4.0",
         mcp_protocol_version="2025-03-26",
         PYTHON_IMAGE_TAG="3.13-alpine",
         UV_VERSION="0.12.10",
     )  # type: ignore[call-arg]
-    assert cfg.penpot_mcp_version == "0.3.0"
+    assert cfg.penpot_mcp_version == "0.4.0"
     assert cfg.mcp_protocol_version == "2025-03-26"
     assert not hasattr(cfg, "PYTHON_IMAGE_TAG")
     assert not hasattr(cfg, "UV_VERSION")
+
+
+@pytest.mark.asyncio
+async def test_hybrid_gateway_and_ws_correlated_futures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from penpot_mcp.gateway import PenpotGateway
+    from penpot_mcp.ws_controller import ws_controller
+
+    gw = PenpotGateway()
+    ws_controller.active_connections.clear()
+    ws_controller.last_telemetry_at = 0.0
+    assert gw.is_interactive is False
+
+    # Simulate HTTP telemetry from plugin ui.html
+    cmds = ws_controller.record_http_telemetry(
+        {
+            "type": "context",
+            "file_id": "file-123",
+            "file_name": "Design System",
+            "page_id": "page-456",
+            "page_name": "Components",
+            "selection": [
+                {"id": "shape-1", "name": "Hero Button", "type": "rect", "x": 10, "y": 20}
+            ],
+        }
+    )
+    assert cmds == []
+    assert gw.is_interactive is True
+    assert gw.active_selection == ["shape-1"]
+
+    sel_res = await gw.execute_intent("get_active_selection")
+    assert sel_res["selected_shape_ids"] == ["shape-1"]
+    assert sel_res["file_id"] == "file-123"
+    assert sel_res["selection"][0]["name"] == "Hero Button"
+
+    # Test correlated execute_script Future resolution
+    class FakeWS:
+        async def send_text(self, payload_str: str) -> None:
+            msg = json.loads(payload_str)
+            ws_controller._handle_plugin_message(
+                {
+                    "type": "result",
+                    "command_id": msg["command_id"],
+                    "status": "ok",
+                    "result": {"zoom": 1.25, "evaluated": True},
+                }
+            )
+
+    fake_ws = FakeWS()
+    ws_controller.active_connections.add(fake_ws)
+    try:
+        exec_res = await gw.execute_intent(
+            "execute_plugin_script", script="return {zoom: 1.25};", await_result=True
+        )
+        assert exec_res["status"] == "OK"
+        assert exec_res["result"] == {"zoom": 1.25, "evaluated": True}
+    finally:
+        ws_controller.active_connections.clear()
+        ws_controller.last_telemetry_at = 0.0
+
+
+@pytest.mark.asyncio
+async def test_sdk_agent_pipeline_gateway_translators_failover_and_chat(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from penpot_mcp.agent_gateway import (
+        PenpotAgentGateway,
+        anthropic_to_gemini,
+        backfill_thought_signatures,
+        classify_failure,
+        gemini_to_anthropic,
+        gemini_to_openai,
+        openai_to_gemini,
+    )
+    from penpot_mcp.server import agent_chat_route, agent_status_route
+
+    # 1. ThoughtSignature backfill & protocol translators
+    sample_body = {
+        "systemInstruction": {"parts": [{"text": "Be concise."}]},
+        "contents": [
+            {"role": "user", "parts": [{"text": "Create a card"}]},
+            {
+                "role": "model",
+                "parts": [
+                    {
+                        "functionCall": {
+                            "id": "c1",
+                            "name": "create_ui_artifact",
+                            "args": {"template_kind": "hero_card"},
+                        }
+                    }
+                ],
+            },
+        ],
+    }
+    fixed_body, sigs_added = backfill_thought_signatures(sample_body)
+    assert sigs_added == 1
+    assert (
+        fixed_body["contents"][1]["parts"][0]["thoughtSignature"]
+        == "skip_thought_signature_validator"
+    )
+
+    oai_req = gemini_to_openai(fixed_body, "gpt-4o-mini")
+    assert oai_req["model"] == "gpt-4o-mini"
+    assert oai_req["messages"][0]["role"] == "system"
+    gem_from_oai = openai_to_gemini(
+        {
+            "model": "gpt-4o-mini",
+            "choices": [
+                {
+                    "message": {"content": "Created hero card."},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        }
+    )
+    assert gem_from_oai["candidates"][0]["content"]["parts"][0]["text"] == "Created hero card."
+
+    anth_req = gemini_to_anthropic(fixed_body, "claude-3-5-haiku-latest")
+    assert anth_req["model"] == "claude-3-5-haiku-latest"
+    gem_from_anth = anthropic_to_gemini(
+        {
+            "model": "claude-3-5-haiku-latest",
+            "content": [{"type": "text", "text": "Done via Anthropic."}],
+            "usage": {"input_tokens": 12, "output_tokens": 6},
+        }
+    )
+    assert gem_from_anth["candidates"][0]["content"]["parts"][0]["text"] == "Done via Anthropic."
+
+    # 2. Circuit breaker & failure classification
+    f_rate = classify_failure(429, {"error": {"message": "Rate limit exceeded"}})
+    assert f_rate.kind == "rate"
+    f_auth = classify_failure(400, {"error": {"message": "API_KEY_INVALID"}})
+    assert f_auth.kind == "auth"
+
+    agw = PenpotAgentGateway()
+    agw.breakers.open_for_failure("google-primary", "gemini", "gemini-3.5-flash-lite", f_rate)
+    assert (
+        agw.breakers.blocking("google-primary", "gemini", "gemini-3.5-flash-lite") is not None
+    )
+    assert agw.breakers.reset() == 1
+
+    # 3. Deterministic & Quick-Action execution through /agent/chat and /agent/status
+    monkeypatch.setattr(
+        "penpot_mcp.tools.create.create_frame",
+        AsyncMock(return_value={"shape_id": "frame-ai-1", "name": "AI Hero Card"}),
+    )
+    monkeypatch.setattr(
+        "penpot_mcp.tools.create.create_rectangle",
+        AsyncMock(return_value={"shape_id": "rect-ai-2", "name": "Pill"}),
+    )
+    monkeypatch.setattr(
+        "penpot_mcp.tools.create.create_text",
+        AsyncMock(return_value={"shape_id": "txt-ai-3", "name": "Text"}),
+    )
+
+    chat_req = SimpleNamespace(
+        method="POST",
+        json=AsyncMock(
+            return_value={
+                "prompt": "Create a Hero Card for Penpot AI Studio",
+                "quick_action": "hero_card",
+                "file_id": "file-123",
+                "page_id": "page-456",
+            }
+        ),
+    )
+    chat_resp = await agent_chat_route(chat_req)
+    chat_data = json.loads(chat_resp.body.decode("utf-8"))
+    assert chat_data["status"] == "OK"
+    assert len(chat_data["created_shapes"]) == 6
+    assert chat_data["tool_trace"][0]["tool"] == "playbook_run"
+
+    status_req = SimpleNamespace(method="GET")
+    monkeypatch.setattr(
+        agw,
+        "resolve_target_canvas",
+        AsyncMock(return_value={"file_id": "file-123", "page_id": "page-456"}),
+    )
+    status_resp = await agent_status_route(status_req)
+    status_data = json.loads(status_resp.body.decode("utf-8"))
+    assert status_data["status"] == "ok"
+    assert "routes" in status_data

@@ -105,7 +105,7 @@ _PLUGIN_DIR = Path(__file__).parent / "plugin"
 
 @mcp.custom_route("/plugin/manifest.json", methods=["GET", "OPTIONS"])
 async def plugin_manifest(request):
-    """Serve the Penpot plugin manifest."""
+    """Serve the Penpot plugin manifest (dynamically adapting host origin for localhost or Docker)."""
     if request.method == "OPTIONS":
         from starlette.responses import Response
         return Response(
@@ -115,9 +115,14 @@ async def plugin_manifest(request):
                 "Access-Control-Allow-Methods": "GET, OPTIONS",
             },
         )
-    return FileResponse(
-        _PLUGIN_DIR / "manifest.json",
-        media_type="application/json",
+    manifest_data = json.loads((_PLUGIN_DIR / "manifest.json").read_text(encoding="utf-8"))
+    req_headers = getattr(request, "headers", {}) or {}
+    host_hdr = req_headers.get("host")
+    if host_hdr:
+        scheme = getattr(getattr(request, "url", None), "scheme", "http") or "http"
+        manifest_data["host"] = f"{scheme}://{host_hdr}"
+    return JSONResponse(
+        manifest_data,
         headers={"Access-Control-Allow-Origin": "*"},
     )
 
@@ -164,10 +169,123 @@ async def plugin_ui(request):
 async def plugin_config(request):
     """Serve dynamic plugin configuration (WebSocket URL, same-origin only)."""
     ws_url = settings.plugin_ws_url
+    same_origin_ws_path = "/plugin/ws"
     if settings.ws_token:
         sep = "&" if "?" in ws_url else "?"
-        ws_url = f"{ws_url}{sep}token={quote(settings.ws_token, safe='')}"
-    return JSONResponse({"ws_url": ws_url, "version": "1.0.0"})
+        encoded_tok = quote(settings.ws_token, safe="")
+        ws_url = f"{ws_url}{sep}token={encoded_tok}"
+        same_origin_ws_path = f"/plugin/ws?token={encoded_tok}"
+    return JSONResponse(
+        {
+            "ws_url": ws_url,
+            "same_origin_ws_path": same_origin_ws_path,
+            "version": settings.penpot_mcp_version,
+            "agent_model": settings.penpot_agent_model,
+            "agent_mode": settings.penpot_agent_mode,
+        }
+    )
+
+
+def _cors_headers() -> dict[str, str]:
+    return {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    }
+
+
+@mcp.custom_route("/plugin/telemetry", methods=["POST", "OPTIONS"])
+async def plugin_telemetry(request):
+    """Receive live selection/context telemetry from ui.html and return any pending commands."""
+    from starlette.responses import Response
+    from penpot_mcp.ws_controller import ws_controller
+
+    if request.method == "OPTIONS":
+        return Response(status_code=204, headers=_cors_headers())
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    commands = ws_controller.record_http_telemetry(body if isinstance(body, dict) else {})
+    return JSONResponse(
+        {
+            "status": "ok",
+            "commands": commands,
+            "context": ws_controller.get_live_context(),
+        },
+        headers=_cors_headers(),
+    )
+
+
+@mcp.custom_route("/agent/status", methods=["GET", "OPTIONS"])
+async def agent_status_route(request):
+    """Return non-secret status of the embedded SDK Agent Pipeline, provider chain, and active canvas."""
+    from starlette.responses import Response
+    from penpot_mcp.agent_gateway import agent_gateway
+
+    if request.method == "OPTIONS":
+        return Response(status_code=204, headers=_cors_headers())
+    status_data = agent_gateway.get_status()
+    canvas = await agent_gateway.resolve_target_canvas()
+    status_data["resolved_canvas"] = canvas
+    return JSONResponse(status_data, headers=_cors_headers())
+
+
+@mcp.custom_route("/agent/chat", methods=["POST", "OPTIONS"])
+async def agent_chat_route(request):
+    """Execute a natural-language or quick-action turn through the SDK Agent Pipeline Gateway."""
+    from dataclasses import asdict
+    from starlette.responses import Response
+    from penpot_mcp.agent_gateway import agent_gateway
+
+    if request.method == "OPTIONS":
+        return Response(status_code=204, headers=_cors_headers())
+    try:
+        payload = await request.json()
+    except Exception:
+        return JSONResponse(
+            {"status": "ERROR", "error": "Invalid JSON body."},
+            status_code=400,
+            headers=_cors_headers(),
+        )
+    if not isinstance(payload, dict):
+        return JSONResponse(
+            {"status": "ERROR", "error": "JSON body must be an object."},
+            status_code=400,
+            headers=_cors_headers(),
+        )
+
+    prompt = str(
+        payload.get("prompt") or payload.get("message") or payload.get("text") or ""
+    ).strip()
+    quick_action = str(payload.get("quick_action") or "").strip() or None
+    if not prompt and not quick_action:
+        return JSONResponse(
+            {"status": "PARAM_ERROR", "error": "'prompt' or 'quick_action' is required."},
+            status_code=422,
+            headers=_cors_headers(),
+        )
+
+    turn = await agent_gateway.chat(
+        prompt or quick_action or "",
+        file_id=payload.get("file_id"),
+        page_id=payload.get("page_id"),
+        quick_action=quick_action,
+        history=payload.get("history") if isinstance(payload.get("history"), list) else None,
+    )
+    return JSONResponse(asdict(turn), headers=_cors_headers())
+
+
+@mcp.custom_route("/agent/breakers/reset", methods=["POST", "OPTIONS"])
+async def agent_breakers_reset(request):
+    """Reset any open provider circuit breakers."""
+    from starlette.responses import Response
+    from penpot_mcp.agent_gateway import agent_gateway
+
+    if request.method == "OPTIONS":
+        return Response(status_code=204, headers=_cors_headers())
+    count = agent_gateway.breakers.reset()
+    return JSONResponse({"status": "ok", "reset_count": count}, headers=_cors_headers())
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1879,7 +1997,13 @@ def main():
     )
 
     async def run():
+        from starlette.routing import WebSocketRoute
+        from penpot_mcp.ws_controller import ws_controller
+
         starlette_app = mcp.streamable_http_app()
+        starlette_app.router.routes.append(
+            WebSocketRoute("/plugin/ws", ws_controller.handle_starlette_ws)
+        )
         starlette_app.add_middleware(
             TrustedHostMiddleware,
             allowed_hosts=settings.mcp_allowed_hosts,
@@ -1891,9 +2015,8 @@ def main():
             logger.info("Connecting to Penpot services...")
             await db.connect()
             await api.connect()
-            from penpot_mcp.ws_controller import ws_controller
             await ws_controller.start()
-            logger.info("Penpot MCP server ready (WS on port %d)", settings.ws_port)
+            logger.info("Penpot MCP server ready (WS on port %d and /plugin/ws)", settings.ws_port)
             try:
                 async with _orig_lifespan(app):
                     yield

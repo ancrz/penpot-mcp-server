@@ -1,6 +1,6 @@
-# Penpot MCP Server — Tool Reference (v0.3.0)
+# Penpot MCP Server — Tool Reference (v0.4.0)
 
-Complete reference for the **14 compressed polymorphic sub-tools** (`MCP_TOOL_MODE=compressed`, default) and all **77 underlying Penpot actions** (`MCP_TOOL_MODE=legacy` / `hybrid`).
+Complete reference for the **14 compressed polymorphic sub-tools** (`MCP_TOOL_MODE=compressed`, default) and all **81 underlying Penpot & AI Studio actions** (`MCP_TOOL_MODE=legacy` / `hybrid`).
 
 ---
 
@@ -26,7 +26,7 @@ By default (`MCP_TOOL_MODE=compressed`), Penpot MCP registers **14 polymorphic d
 | `media` | `list_media`, `upload`, `list_fonts` |
 | `export` | `png`, `svg` |
 | `system` | `query_db`, `profile`, `webhooks`, `snapshots`, `create_snapshot` |
-| `plugin` | `selection`, `execute_script` |
+| `plugin` | `selection`, `context`, `status`, `execute_script`, `focus`, `agent_chat` |
 | `playbook_run` | `batch`, `code`, `run`, `create`, `list`, `dag_audit` |
 
 ---

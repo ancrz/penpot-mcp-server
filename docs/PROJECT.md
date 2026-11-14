@@ -1,21 +1,21 @@
 # Project Context: Penpot MCP Server
 
 ## 1. Premise & Core Intent
-`penpot-mcp-server` provides AI agents (Claude Code, Cursor, Gemini CLI, Antigravity) with full programmatic access to self-hosted [Penpot](https://penpot.app) instances via the Model Context Protocol (FastMCP protocol version `2025-03-26`).
+`penpot-mcp-server` (`v0.4.0`) provides AI agents (Claude Code, Cursor, Gemini CLI, Antigravity) and in-app Penpot designers with full programmatic access to self-hosted [Penpot](https://penpot.app) instances via the Model Context Protocol (FastMCP `2025-03-26`), an AEP-inspired **14 Sub-Tool + Code Mode (`playbook_run`)** execution engine, and an embedded **SDK Agent Pipeline (`PenpotAgentGateway`)** with the **Penpot AI Studio** in-app mini-frontend.
 
-## 2. Active Intent: v0.2.0 Hardening & Modernization
-- Complete upgrade from initial `0.1.0` baseline to `0.2.0`.
-- Eliminate 76 known supply-chain vulnerabilities flagged by `pip-audit` (reduced to 0 CVEs).
-- Eliminate Semgrep SAST security and code quality findings across source and infra configs (0 findings across 1584 auto and 1455 security rules).
-- Provide a hardened, multi-stage Alpine Docker runtime with non-root privileges (`appuser`), Docker healthchecks, and stripped build packages (78 artifacts, 0 container CVEs via Docker Scout & OSV.dev).
-- Parameterize build arguments and version configuration across `.env`, `Dockerfile`, and `docker-compose.penpot.yml`.
+## 2. Active Intent: v0.4.0 Hybrid Gateway, SDK Agent Pipeline & Penpot AI Studio GUI
+- **RE as SDD Integration**: Synthesized Figma AI ("Make Designs" contextual bar & live selection context), Official Penpot MCP (bidirectional WebSocket RPC & JS sandbox evaluation), `sdk-agent-pipeline` (multi-provider Gemini REST adapter, `thoughtSignature` backfill, circuit-breaker failover), and `vanguard-control` (`/agent/status`, `/agent/chat`, `/agent/breakers/reset`).
+- **Sanitized & Polished Tools**: Fixed `PenpotGateway.is_interactive` to dynamically track `ws_controller.is_connected`, added `asyncio.Future` request/response correlation (`execute_script`, `request_context`), and expanded the `plugin` sub-tool to 6 actions (`selection`, `context`, `status`, `execute_script`, `focus`, `agent_chat`).
+- **In-App Penpot AI Studio GUI (`ui.html` + `plugin.js`)**: Embedded mini-frontend inside Penpot providing live WS + HTTP telemetry, active model/selection badges, 1-click Quick Actions (`+ Hero Card`, `+ Login Form`, `+ Pricing Card`, `+ Navbar`, `Bind Tokens`, `Inspect CSS`), natural-language composer, tool execution trace viewer, and shape focus pills.
 
 ## 3. Architecture & Key Decisions
-- **Tri-Layer Strategy:** Direct PostgreSQL reads via `asyncpg`, RPC API writes via `httpx`, and live browser canvas interactions via WebSocket bridge (`websockets`).
-- **Runtime & Toolchain:** Python 3.13-alpine, Astral `uv` 0.12.10 package manager, Pydantic v2 Settings with `extra = "ignore"`.
-- **Packaging:** Multi-stage Docker container with stripped pip/setuptools/ensurepip artifacts.
+- **Quad-Layer Strategy**:
+  1. Direct PostgreSQL reads via `asyncpg` (`db.py`)
+  2. Validated Penpot Transit/JSON RPC writes via `httpx` (`api.py`)
+  3. Bidirectional Plugin WebSocket & HTTP Telemetry bridge (`ws_controller.py` + `gateway.py`)
+  4. Embedded Multi-Provider AI Gateway (`agent_gateway.py`) + In-App **Penpot AI Studio** (`plugin/ui.html`, `plugin/plugin.js`)
+- **Runtime & Security**: Python 3.13-alpine, Astral `uv` 0.12.10, non-root container (`0` CVEs in Docker Scout and `pip-audit`, `0` Semgrep findings).
 
 ## 4. Current State
-- **Implementation:** Completed by Pragma across 14 source and configuration files.
-- **Verification:** Stage 5 verification completed by Dokimos with a **VERIFIED** verdict across all 8 quality gates (Ruff lint, Pytest 38/38, Mypy, Semgrep Auto, Semgrep Security, pip-audit, Docker smoke test, Docker Scout OSV).
-- **Handoff:** Ready for Stage 6 Hermon atomic commit and release tagging (`v0.2.0`).
+- **Implementation**: Completed by Pragma (`v0.4.0`).
+- **Verification**: Verified by Dokimos (45/45 unit tests, Ruff 0, Mypy 0 across 34 files, Semgrep 0, Docker Scout 0 CVEs, live Gemini `gemini-3.5-flash-lite` `/agent/chat` execution, and live Playwright verification of the Penpot AI Studio GUI and Penpot canvas).

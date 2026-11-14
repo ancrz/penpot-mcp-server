@@ -1,12 +1,16 @@
 {
-  "name": "Penpot MCP",
-  "description": "AI-powered interactive bridge for Penpot MCP Server",
+  "name": "Penpot AI Studio (MCP Gateway)",
+  "description": "In-App AI Design Assistant & Bidirectional MCP Gateway powered by SDK Agent Pipeline",
   "host": "http://localhost:8787",
   "code": "plugin/plugin.js",
   "icon": "",
   "permissions": [
     "content:read",
     "content:write",
+    "library:read",
+    "library:write",
+    "comment:read",
+    "comment:write",
     "allow:downloads"
   ]
 }

@@ -31,5 +31,6 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
-# Local documentation notes
+# Local documentation notes & RE isolation artifacts
 docs/*.md
+_re/

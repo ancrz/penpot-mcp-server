@@ -5,8 +5,8 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python 3.13+](https://img.shields.io/badge/Python-3.13+-yellow.svg)](https://python.org)
 [![MCP Protocol](https://img.shields.io/badge/MCP-2025--03--26-green.svg)](https://modelcontextprotocol.io)
-[![Version: 0.3.0](https://img.shields.io/badge/Version-0.3.0-purple.svg)](pyproject.toml)
-[![Tools: 14 Sub--Tools / 77 Actions](https://img.shields.io/badge/Tools-14_Sub--Tools_(77_Actions)-orange.svg)](TOOLS.md)
+[![Version: 0.4.0](https://img.shields.io/badge/Version-0.4.0-purple.svg)](pyproject.toml)
+[![Tools: 14 Sub--Tools / 81 Actions](https://img.shields.io/badge/Tools-14_Sub--Tools_(81_Actions)-orange.svg)](TOOLS.md)
 
 ---
 
@@ -29,16 +29,30 @@ Think of it as the bridge between your AI assistant and your design tool.
 
 ---
 
-## Milestones & Status (v0.3.0)
+## Milestones & Status (v0.4.0)
 
 ```mermaid
 flowchart LR
-    I["Intent: v0.3.0 AEP Sub-Tool Compression, Code Mode & SSRF Hardening"] --> M1["M1: planned (Orchestrator) ✅"]
-    M1 --> M2["M2: implemented (Pragma) ✅"]
-    M2 --> M3["M3: verified (Dokimos) ✅"]
-    M3 --> M4["M4: documented (Graphos) ✅"]
-    M4 --> M5["M5: committed (Hermon) ✅"]
+    I["Intent: v0.4.0 Hybrid PenpotGateway, SDK Agent Pipeline & Penpot AI Studio GUI"] --> M1["M1: planned (Archon + Graphos G1) ✅"]
+    M1 --> M2["M2: audited (Ontos) ✅"]
+    M2 --> M3["M3: implemented (Pragma) ✅"]
+    M3 --> M4["M4: verified (Dokimos + Playwright) ✅"]
+    M4 --> M5["M5: documented (Graphos G2) ✅"]
+    M5 --> M6["M6: committed (Hermon) ✅"]
 ```
+
+---
+
+## In-App Penpot AI Studio & Embedded SDK Agent Pipeline (v0.4.0)
+
+`penpot-mcp-server` (`v0.4.0`) embeds a modular **SDK Agent Pipeline (`PenpotAgentGateway`)** and an in-app **Penpot AI Studio** mini-frontend (`http://localhost:8787/plugin/ui.html` / `/plugin/manifest.json`):
+- **Multi-Provider AI Gateway (`src/penpot_mcp/agent_gateway.py`)**: Native Gemini REST adapter (`gemini-3.5-flash-lite`, `gemini-2.5-flash`) with `thoughtSignature` backfill, OpenAI/Ollama and Anthropic protocol translation, circuit-breaker failover (`primary -> backup -> local -> deterministic`), and 1-turn `playbook_run(action='code')` UI synthesis (`hero_card`, `login_form`, `pricing_card`, `navbar`).
+- **Correlated Bidirectional Plugin Bridge (`src/penpot_mcp/ws_controller.py` & `gateway.py`)**: Supports `asyncio.Future` request/response correlation (`execute_script`, `request_context`), same-origin WebSocket (`/plugin/ws` on `:8787`), standalone WebSocket (`:4402`), and HTTP telemetry (`/plugin/telemetry`).
+- **REST & WS Endpoints**:
+  - `GET /agent/status` — Live provider routing, circuit-breaker status, and active canvas telemetry.
+  - `POST /agent/chat` — Natural-language prompt and Quick Action execution directly against the active Penpot canvas.
+  - `POST /agent/breakers/reset` — Reset open provider circuit breakers.
+  - `WS /plugin/ws` & `POST /plugin/telemetry` — Live bidirectional telemetry and script execution for the Penpot plugin.
 
 ---
 
