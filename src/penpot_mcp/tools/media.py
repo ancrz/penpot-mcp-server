@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from penpot_mcp.services.api import api
+from penpot_mcp.services.api import api, validate_external_media_url
 from penpot_mcp.services.db import db
 
 
@@ -54,4 +54,5 @@ async def upload_media(file_id: str, name: str, url: str) -> dict:
         name: Name for the media asset.
         url: Public URL of the image to upload.
     """
-    return await api.upload_media(file_id, name, url)
+    safe_url = validate_external_media_url(url)
+    return await api.upload_media(file_id, name, safe_url)

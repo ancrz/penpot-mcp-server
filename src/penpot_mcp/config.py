@@ -4,15 +4,19 @@ from __future__ import annotations
 
 from pydantic_settings import BaseSettings
 
+from penpot_mcp import __version__
+
 
 class Settings(BaseSettings):
-    # Version & protocol
-    penpot_mcp_version: str = "0.2.0"
+    # Version & protocol (parameterized via .env for builds, upgrades, and runtime)
+    penpot_mcp_version: str = __version__
     mcp_protocol_version: str = "2025-03-26"
+    mcp_tool_mode: str = "compressed"
 
     # Penpot connection
     penpot_base_url: str = "http://penpot-frontend:8080"
     penpot_public_url: str = "http://localhost:9001"
+    ssrf_allow_private_media: bool = False
 
     # Auth - access token (preferred)
     penpot_access_token: str = ""
@@ -21,11 +25,13 @@ class Settings(BaseSettings):
     penpot_email: str = ""
     penpot_password: str = ""
 
-    # PostgreSQL direct access (use dedicated read-only penpot_mcp role in production)
+    # PostgreSQL direct access
+    # Default is 'penpot' for backward compatibility with existing installations;
+    # production deployments should set PENPOT_DB_USER=penpot_mcp (read-only role).
     penpot_db_host: str = "penpot-postgres"
     penpot_db_port: int = 5432
     penpot_db_name: str = "penpot"
-    penpot_db_user: str = "penpot_mcp"
+    penpot_db_user: str = "penpot"
     penpot_db_pass: str = ""
     db_statement_timeout_ms: int = 30000
 

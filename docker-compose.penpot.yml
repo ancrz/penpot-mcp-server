@@ -25,12 +25,12 @@
 
 services:
   penpot-mcp:
-    image: "penpot-mcp:${PENPOT_MCP_VERSION:-0.2.0}"
+    image: "penpot-mcp:${PENPOT_MCP_VERSION:-0.3.0}"
     build:
       context: ./penpot-mcp-server
       dockerfile: Dockerfile
       args:
-        PENPOT_MCP_VERSION: "${PENPOT_MCP_VERSION:-0.2.0}"
+        PENPOT_MCP_VERSION: "${PENPOT_MCP_VERSION:-0.3.0}"
         PYTHON_IMAGE_TAG: "${PYTHON_IMAGE_TAG:-3.13-alpine}"
         UV_VERSION: "${UV_VERSION:-0.12.10}"
     container_name: penpot-mcp
@@ -46,15 +46,19 @@ services:
     networks:
       - penpot
     environment:
+      PENPOT_MCP_VERSION: "${PENPOT_MCP_VERSION:-0.3.0}"
+      MCP_PROTOCOL_VERSION: "${MCP_PROTOCOL_VERSION:-2025-03-26}"
+      MCP_TOOL_MODE: "${MCP_TOOL_MODE:-compressed}"
       PENPOT_BASE_URL: "http://penpot-frontend:8080"
       PENPOT_PUBLIC_URL: "${PENPOT_PUBLIC_URI:-http://localhost:9001}"
+      SSRF_ALLOW_PRIVATE_MEDIA: "${SSRF_ALLOW_PRIVATE_MEDIA:-false}"
       PENPOT_ACCESS_TOKEN: "${PENPOT_ACCESS_TOKEN:-}"
       PENPOT_EMAIL: "${PENPOT_EMAIL:-}"
       PENPOT_PASSWORD: "${PENPOT_PASSWORD:-}"
       PENPOT_DB_HOST: "penpot-postgres"
       PENPOT_DB_PORT: "5432"
       PENPOT_DB_NAME: "penpot"
-      PENPOT_DB_USER: "${PENPOT_DB_USER:-penpot_mcp}"
+      PENPOT_DB_USER: "${PENPOT_DB_USER:-penpot}"
       PENPOT_DB_PASS: "${PENPOT_DB_PASS:-}"
       DB_STATEMENT_TIMEOUT_MS: "30000"
       MCP_HOST: "0.0.0.0"

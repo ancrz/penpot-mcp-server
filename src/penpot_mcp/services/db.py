@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import logging
 from typing import Any
 
 import asyncpg
 
 from penpot_mcp.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class PenpotDB:
@@ -17,6 +20,11 @@ class PenpotDB:
         self._pool: asyncpg.Pool | None = None
 
     async def connect(self) -> None:
+        if settings.penpot_db_user == "penpot":
+            logger.warning(
+                "Connecting to PostgreSQL with default user 'penpot'. "
+                "For hardened deployments, configure the read-only role PENPOT_DB_USER=penpot_mcp."
+            )
         self._pool = await asyncpg.create_pool(
             host=settings.penpot_db_host,
             port=settings.penpot_db_port,

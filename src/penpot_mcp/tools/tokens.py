@@ -228,6 +228,12 @@ async def apply_design_token(
         target_property: Target property - "fill" or "stroke" (applies only to color tokens).
     """
     logger.info("Applying design style %s (%s) to shapes: %s", token_id, token_type, shape_ids)
+    if token_type not in ("color", "typography"):
+        raise ValueError(f"Invalid token_type {token_type!r}: must be 'color' or 'typography'.")
+    if token_type == "color" and target_property not in ("fill", "stroke"):
+        raise ValueError(f"Invalid target_property {target_property!r}: must be 'fill' or 'stroke'.")
+    if not shape_ids:
+        raise ValueError("shape_ids must contain at least one shape UUID.")
     
     if token_type == "color":
         color_tokens = await get_colors_library(file_id)

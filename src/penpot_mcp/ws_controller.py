@@ -71,11 +71,17 @@ class PenpotWSController:
 
     def _handle_plugin_message(self, data: Dict[str, Any]) -> None:
         """Parse passive intents from the plugin (e.g., selection changes)."""
+        if not isinstance(data, dict):
+            return
         msg_type = data.get("type")
 
         if msg_type == "selectionchange":
-            # Phase 3: Selection Context Updates
-            self.active_selection = data.get("ids", [])
+            # Phase 3: Selection Context Updates (bounded & type-checked)
+            raw_ids = data.get("ids", [])
+            if isinstance(raw_ids, list):
+                self.active_selection = [
+                    str(item) for item in raw_ids[:1000] if isinstance(item, str)
+                ]
             logger.debug("Live selection updated: %d shapes", len(self.active_selection))
 
         elif msg_type == "ack":
@@ -86,7 +92,7 @@ class PenpotWSController:
 
         Returns True if sent successfully, False if offline.
         """
-        if not self.is_connected:
+        if not self.is_connected or not (script or "").strip():
             return False
 
         payload = json.dumps(
@@ -109,9 +115,15 @@ class PenpotWSController:
                 "Plugin WebSocket bridge disabled (set WS_ENABLED=true and WS_TOKEN to enable)"
             )
             return
-        if not settings.ws_token:
+        if not settings.ws_token or len(settings.ws_token.strip()) < 8:
             logger.warning(
-                "WS_ENABLED=true but WS_TOKEN is empty; refusing to start unauthenticated WebSocket bridge"
+                "WS_ENABLED=true but WS_TOKEN is empty or too short (<8 chars); refusing to start WebSocket bridge"
+            )
+            return
+        if settings.ws_host not in ("127.0.0.1", "localhost", "::1"):
+            logger.warning(
+                "Refusing to bind Plugin WebSocket bridge to non-loopback host %s",
+                settings.ws_host,
             )
             return
 
@@ -129,6 +141,7 @@ class PenpotWSController:
             self.port,
             origins=[websockets.Origin(settings.plugin_origin)],
             process_request=self._check_token,
+            max_size=1_048_576,
         )
 
     async def stop(self) -> None:

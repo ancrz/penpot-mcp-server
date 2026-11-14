@@ -5,7 +5,8 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python 3.13+](https://img.shields.io/badge/Python-3.13+-yellow.svg)](https://python.org)
 [![MCP Protocol](https://img.shields.io/badge/MCP-2025--03--26-green.svg)](https://modelcontextprotocol.io)
-[![Tools: 77](https://img.shields.io/badge/Tools-77-orange.svg)](TOOLS.md)
+[![Version: 0.3.0](https://img.shields.io/badge/Version-0.3.0-purple.svg)](pyproject.toml)
+[![Tools: 14 Sub--Tools / 77 Actions](https://img.shields.io/badge/Tools-14_Sub--Tools_(77_Actions)-orange.svg)](TOOLS.md)
 
 ---
 
@@ -20,22 +21,23 @@ Think of it as the bridge between your AI assistant and your design tool.
 | Problem | Solution |
 |---|---|
 | **Manual design work** | AI creates UI components, layouts, and prototypes directly in Penpot |
-| **No programmatic API for Penpot** | 77 tools covering projects, shapes, text, exports, comments, and more |
+| **No programmatic API for Penpot** | 14 polymorphic domain sub-tools multiplexing all 77 Penpot actions (or 77 individual tools in legacy mode) |
+| **Token bloat & multi-turn latency** | AEP-style tool compression (~82% schema reduction) + `playbook_run` Code Mode batching with `$prev`/`$steps`/`$cache` variable piping |
 | **Design-to-code gap** | Generate CSS from any shape, export to SVG/PNG, extract design tokens |
-| **Repetitive tasks** | Batch operations — rename shapes, update colors, create variants |
+| **Repetitive tasks** | Batch operations — rename shapes, update colors, create variants in a single turn |
 | **Design system maintenance** | Read/write components, colors, typographies programmatically |
 
 ---
 
-## Milestones & Status (v0.2.0)
+## Milestones & Status (v0.3.0)
 
 ```mermaid
 flowchart LR
-    I["Intent: v0.2.0 Security Hardening"] --> M1["M1: planned (Orchestrator) ✅"]
+    I["Intent: v0.3.0 AEP Sub-Tool Compression, Code Mode & SSRF Hardening"] --> M1["M1: planned (Orchestrator) ✅"]
     M1 --> M2["M2: implemented (Pragma) ✅"]
     M2 --> M3["M3: verified (Dokimos) ✅"]
     M3 --> M4["M4: documented (Graphos) ✅"]
-    M4 --> M5["M5: committed (Hermon)"]
+    M4 --> M5["M5: committed (Hermon) ✅"]
 ```
 
 ---
@@ -47,8 +49,8 @@ graph TB
     AI["AI Agent\n(Claude Code · Cursor · Gemini CLI)"]
 
     subgraph SERVERS["MCP Layer"]
-        MCP["penpot-mcp — Python\n77 tools · :8787\nDB reads + API writes + Plugin"]
-        OMCP["Penpot MCP — Official\n~20 tools · penpot/penpot monorepo\nPlugin API only · TypeScript"]
+        MCP["penpot-mcp — Python (v0.3.0)\n14 compressed sub-tools (77 actions) · :8787\nDB reads + API writes + Plugin + Code Mode"]
+        OMCP["Official Penpot Plugin MCP\n(penpot/penpot monorepo)\nBrowser Plugin API only · TypeScript"]
     end
 
     subgraph PENPOT["Penpot Stack (Docker)"]
@@ -177,7 +179,7 @@ docker compose up -d --build penpot-mcp
 ```bash
 # Quick health check
 curl -s http://localhost:8787/
-# → {"service": "Penpot MCP", "status": "ok", "version": "0.2.0"}
+# → {"service": "Penpot MCP", "status": "ok", "version": "0.3.0", "tool_mode": "compressed"}
 ```
 
 ```bash
@@ -234,7 +236,7 @@ Claude Code uses `"type": "http"` for streamable HTTP connections.
 }
 ```
 
-Restart Claude Code. You should see **77 tools** from the `penpot` server listed when you run `/mcp`.
+Restart Claude Code. You should see **14 compressed sub-tools** (default `MCP_TOOL_MODE=compressed`, multiplexing all 77 actions) or **77 tools** (`MCP_TOOL_MODE=legacy`) from the `penpot` server listed when you run `/mcp`.
 
 > **Note:** Use `"type": "http"`, not `"streamable-http"`. Claude Code maps `http` to the streamable HTTP transport internally. Using `streamable-http` will cause a schema validation error.
 
@@ -364,25 +366,41 @@ If no popup appears and the plugin stays disconnected, check `chrome://flags/#pr
 
 ---
 
-## Tools Overview
+## Tools Overview & AEP Code Mode
 
-The server provides **77 tools** across 13 categories. See [**TOOLS.md**](TOOLS.md) for the complete reference with all parameters.
+By default (`MCP_TOOL_MODE=compressed`), the server exposes **14 polymorphic domain sub-tools** inspired by the **Agent Execution Plane (AEP)** architecture. These 14 sub-tools multiplex all **77 Penpot actions** behind a single `action` discriminator per domain, reducing initial MCP `tools/list` schema token overhead by **~82%** while adding:
 
-| Category | Count | Examples |
+- **`discover`**: Single-call capability matrix (`action="capabilities"`), intent routing (`action="discover"`), on-demand schema inspection (`action="schema"`), and multi-step workflow recipes (`action="playbook"`), backed by a RAM `SessionPool` (~95% token savings on cache hits).
+- **`playbook_run` (Code Mode / Batch Execution)**: Execute multi-step Penpot pipelines in a **single MCP round-trip** (`action="batch"` or `action="code"`) with:
+  - **Topos DAG validation** (`ToposGuard`) to block circular step dependencies before execution.
+  - **Structural variable hydration** (`${var}` preserving native `int`/`float`/`bool`/`list` types).
+  - **Cross-step output piping** (`$prev.shape_id`, `$steps.<step_id>.shape_id`, `$cache.<slot>.id`) so you can create a frame, configure Flex/Grid layout, and insert child shapes in one call without waiting for intermediate UUIDs.
+  - **Token optimization controls**: `verbosity="summary" | "detail" | "brief" | "terse"`, `select_fields=["status", "output.shape_id"]` (server-side dot-path field projection), and `return_only="last" | "summary" | "all"`.
+- **Configurable Tool Surface (`MCP_TOOL_MODE`)**:
+  - `compressed` *(default)*: **14 polymorphic sub-tools** multiplexing all 77 actions.
+  - `legacy`: **77 individual tools** for backwards compatibility with legacy prompts.
+  - `hybrid`: **91 tools** (both the 14 compressed sub-tools and the 77 legacy tools).
+
+See [**TOOLS.md**](TOOLS.md) for the complete reference of both the **14 compressed sub-tools** and all **77 underlying actions**.
+
+### The 14 Polymorphic Sub-Tools (`MCP_TOOL_MODE=compressed`)
+
+| Sub-Tool | Actions Multiplexed | Domain Summary |
 |---|---|---|
-| Projects & Teams | 4 | `list_projects`, `list_teams`, `list_files`, `search_files` |
-| File Operations | 9 | `create_file`, `get_file_pages`, `rename_file`, `duplicate_file` |
-| Shape Reading | 6 | `get_shape_tree`, `get_shape_details`, `get_shape_css`, `search_shapes` |
-| Components & Tokens | 12 | `create_color`, `update_color`, `apply_design_token`, `auto_bind_library_tokens` |
-| Comments | 6 | `create_comment`, `reply_to_comment`, `resolve_comment` |
-| Media & Fonts | 3 | `upload_media`, `list_media_assets`, `list_fonts` |
-| Database & Advanced | 3 | `query_database`, `get_webhooks`, `get_profile` |
-| Snapshots | 2 | `create_snapshot`, `get_snapshots` |
-| Export | 2 | `export_frame_png`, `export_frame_svg` |
-| Shape Creation | 9 | `create_rectangle`, `create_frame`, `create_text`, `create_path`, `create_component_instance` |
-| Shape Modification | 12 | `set_fill`, `set_stroke`, `set_layout`, `move_shape`, `resize_shape` |
-| Text Operations | 5 | `set_text_content`, `set_font`, `set_font_size`, `set_text_align` |
-| Advanced Analysis | 2 | `get_file_raw_data`, `compare_revisions` |
+| `discover` | 4 (`capabilities`, `discover`, `schema`, `playbook`) | Capability router, schema inspector, and workflow recipes |
+| `projects` | 5 (`list_teams`, `list_projects`, `create_project`, `list_files`, `search_files`) | Teams, projects, and project file discovery |
+| `files` | 12 (`summary`, `pages`, `history`, `libraries`, `raw_data`, `compare_revisions`, `create`, `rename`, `delete`, `duplicate`, `create_page`, `delete_page`) | File & page CRUD, revision comparison, and raw transit inspection |
+| `shapes` | 6 (`tree`, `details`, `css`, `svg`, `layout`, `search`) | Shape hierarchy reading, search, and CSS/SVG/layout extraction |
+| `create` | 9 (`rectangle`, `ellipse`, `frame`, `text`, `path`, `group`, `clone`, `component_instance`, `from_svg`) | Shape, frame, vector, SVG, and component instance creation |
+| `modify` | 12 (`move`, `resize`, `fill`, `stroke`, `opacity`, `rotation`, `shadow`, `blur`, `border_radius`, `layout`, `delete`, `rename`) | Visual styling, geometry transforms, and Flex/Grid auto-layout |
+| `text` | 5 (`get`, `set_content`, `set_font`, `set_font_size`, `set_align`) | Typography and text content manipulation |
+| `assets` | 12 (`components`, `colors`, `typographies`, `create_component`, `create_color`, `update_color`, `delete_color`, `create_typography`, `update_typography`, `delete_typography`, `apply_token`, `auto_bind_tokens`) | Design system components, colors, typographies, and design tokens |
+| `comments` | 6 (`list_threads`, `thread_comments`, `create`, `reply`, `resolve`, `delete_thread`) | Design review threads and collaboration comments |
+| `media` | 3 (`list_media`, `upload`, `list_fonts`) | SSRF-guarded media asset upload and custom fonts |
+| `export` | 2 (`png`, `svg`) | Headless Chromium pixel-perfect PNG and vector SVG rendering |
+| `system` | 5 (`query_db`, `profile`, `webhooks`, `snapshots`, `create_snapshot`) | Read-only SQL analytics, user profile, webhooks, and snapshots |
+| `plugin` | 2 (`selection`, `execute_script`) | Live browser canvas bridge (selection & JS execution) |
+| `playbook_run` | 6 (`batch`, `code`, `run`, `create`, `list`, `dag_audit`) | Multi-step Code Mode batch execution with `$prev`/`$steps`/`$cache` piping |
 
 ---
 
@@ -392,10 +410,11 @@ All settings are via environment variables. See [`.env.example`](.env.example) f
 
 | Variable | Default | Description |
 |---|---|---|
-| `PENPOT_MCP_VERSION` | `0.2.0` | Penpot MCP server release version |
+| `PENPOT_MCP_VERSION` | `0.3.0` | Penpot MCP server release version |
 | `PYTHON_IMAGE_TAG` | `3.13-alpine` | Base container image tag for Python runtime (`3.13-alpine` or `3.13-slim`) |
 | `UV_VERSION` | `0.12.10` | Astral uv version used in container builder stage |
 | `MCP_PROTOCOL_VERSION` | `2025-03-26` | Model Context Protocol version header |
+| `MCP_TOOL_MODE` | `compressed` | Tool registration mode: `compressed` (14 sub-tools), `legacy` (77 tools), or `hybrid` (91 tools) |
 | `PENPOT_BASE_URL` | `http://penpot-frontend:8080` | Internal Penpot URL (Docker network) |
 | `PENPOT_PUBLIC_URL` | `http://localhost:9001` | Public URL where you access Penpot in browser |
 | `PENPOT_ACCESS_TOKEN` | — | API access token (preferred auth method) |
@@ -404,9 +423,10 @@ All settings are via environment variables. See [`.env.example`](.env.example) f
 | `PENPOT_DB_HOST` | `penpot-postgres` | PostgreSQL host |
 | `PENPOT_DB_PORT` | `5432` | PostgreSQL port |
 | `PENPOT_DB_NAME` | `penpot` | Database name |
-| `PENPOT_DB_USER` | `penpot_mcp` | Database user (dedicated read-only role recommended) |
+| `PENPOT_DB_USER` | `penpot` | Database user (`penpot` default for compatibility; dedicated read-only `penpot_mcp` role recommended in production) |
 | `PENPOT_DB_PASS` | — | Database password |
 | `DB_STATEMENT_TIMEOUT_MS` | `30000` | Read-only SQL statement timeout in milliseconds |
+| `SSRF_ALLOW_PRIVATE_MEDIA` | `false` | Allow RFC1918 private network URLs in `upload_media` (loopback & cloud metadata IPs remain always blocked) |
 | `MCP_HOST` | `0.0.0.0` | MCP server bind address (publish on `127.0.0.1` only unless behind an authenticating reverse proxy) |
 | `MCP_PORT` | `8787` | MCP server port |
 | `MCP_LOG_LEVEL` | `info` | Log level (debug/info/warning/error) |
@@ -490,7 +510,9 @@ uv run pytest tests/ -v
 ```
 penpot-mcp-server/
 ├── src/penpot_mcp/
-│   ├── server.py            # FastMCP entry point, 77 tool registrations, plugin routes
+│   ├── __init__.py          # Package version (__version__ = "0.3.0")
+│   ├── server.py            # FastMCP entry point, 14 compressed / 77 legacy tool modes
+│   ├── aep_engine.py        # AEP RAM SessionPool, ToposGuard DAG, field projection & piping
 │   ├── config.py            # Pydantic Settings configuration
 │   ├── gateway.py           # Hybrid context gateway (DB + Plugin awareness)
 │   ├── ws_controller.py     # WebSocket server for browser plugin bridge (:4402)
@@ -499,11 +521,12 @@ penpot-mcp-server/
 │   │   ├── plugin.js        # Plugin worker — penpot.* API only (no WebSocket in sandbox)
 │   │   └── ui.html          # Plugin iframe — WebSocket lives here, relays to plugin.js
 │   ├── services/
-│   │   ├── db.py            # asyncpg connection pool
-│   │   ├── api.py           # httpx RPC API client
+│   │   ├── db.py            # asyncpg connection pool (read-only SQL guards)
+│   │   ├── api.py           # httpx RPC API client + SSRF & RPC command guards
 │   │   ├── changes.py       # Penpot change operations builder
 │   │   └── transit.py       # Transit+JSON decoder
 │   ├── tools/
+│   │   ├── subtools.py      # 14 polymorphic domain sub-tools + playbook_run Code Mode
 │   │   ├── projects.py      # Team & project queries
 │   │   ├── files.py         # File CRUD operations
 │   │   ├── shapes.py        # Shape reading & search
@@ -511,10 +534,13 @@ penpot-mcp-server/
 │   │   ├── modify.py        # Shape modification
 │   │   ├── text.py          # Text operations
 │   │   ├── export.py        # PNG/SVG export
-│   │   ├── components.py    # Components & design tokens
+│   │   ├── components.py    # Components & shared libraries
+│   │   ├── colors.py        # Library color assets (solid & gradient)
+│   │   ├── typographies.py  # Library typography assets
+│   │   ├── tokens.py        # Design tokens & auto-binding
 │   │   ├── comments.py      # Comments & collaboration
-│   │   ├── media.py         # Media assets & fonts
-│   │   ├── database.py      # Raw SQL queries
+│   │   ├── media.py         # Media assets & fonts (SSRF-guarded)
+│   │   ├── database.py      # Read-only SQL queries
 │   │   └── advanced.py      # File raw data & revision comparison
 │   └── transformers/
 │       ├── css.py           # Shape → CSS conversion

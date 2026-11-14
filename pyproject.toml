@@ -1,6 +1,6 @@
 [project]
 name = "penpot-mcp"
-version = "0.2.0"
+dynamic = ["version"]
 description = "MCP server for self-hosted Penpot — AI-powered UI/UX design and prototyping"
 readme = {text = "", content-type = "text/plain"}
 requires-python = ">=3.13"
@@ -20,6 +20,9 @@ penpot-mcp = "penpot_mcp.server:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/penpot_mcp/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/penpot_mcp"]

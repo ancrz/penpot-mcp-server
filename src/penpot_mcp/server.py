@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from contextlib import asynccontextmanager
 import json
 import logging
-from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 from urllib.parse import quote
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.lowlevel.server import NotificationOptions
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import FileResponse, JSONResponse
@@ -19,14 +22,21 @@ from penpot_mcp.services.db import db
 
 logger = logging.getLogger(__name__)
 
+_INSTRUCTIONS = (
+    "Penpot MCP Server (AEP-Optimized Suite) — provides AI agents with full access "
+    "to self-hosted Penpot design files, shapes, components, design tokens, comments, and exports. "
+    "Reads from PostgreSQL for speed, writes via Penpot RPC API for safety.\n"
+    "Recommended workflow:\n"
+    "1. Call discover(action='capabilities', verbosity='summary') or discover(use_case='...') for orientation.\n"
+    "2. Use the 14 compressed polymorphic sub-tools (discover, projects, files, shapes, create, modify, "
+    "text, assets, comments, media, export, system, plugin, playbook_run) with verbosity='summary' and select_fields=[...].\n"
+    "3. Chain multi-step UI creation/modification in 1 turn using playbook_run(action='batch', steps=[...], "
+    "return_only='last') with $prev.*, $steps.<id>.*, and $cache.<key>.* variable piping."
+)
 
 mcp = FastMCP(
     "Penpot MCP",
-    instructions=(
-        "MCP server for self-hosted Penpot — provides AI agents with full access "
-        "to design files, shapes, components, design tokens, comments, and more. "
-        "Reads from PostgreSQL for speed, writes via Penpot RPC API for safety."
-    ),
+    instructions=_INSTRUCTIONS,
     host=settings.mcp_host,
     port=settings.mcp_port,
     transport_security=TransportSecuritySettings(
@@ -37,6 +47,34 @@ mcp = FastMCP(
     ),
 )
 
+_orig_create_init_options = mcp._mcp_server.create_initialization_options
+
+
+def _create_initialization_options(
+    notification_options: NotificationOptions | None = None,
+    experimental_capabilities: dict[str, dict[str, Any]] | None = None,
+) -> Any:
+    if notification_options is None:
+        notification_options = NotificationOptions(tools_changed=True)
+    else:
+        notification_options.tools_changed = True
+    return _orig_create_init_options(notification_options, experimental_capabilities)
+
+
+setattr(mcp._mcp_server, "create_initialization_options", _create_initialization_options)
+
+_LEGACY_TOOL_FNS: list[Callable[..., Any]] = []
+
+
+def _legacy_tool() -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """Record a legacy granular tool function for registration in 'legacy' or 'hybrid' mode."""
+
+    def _decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
+        _LEGACY_TOOL_FNS.append(fn)
+        return fn
+
+    return _decorator
+
 
 # ═══════════════════════════════════════════════════════════════
 # Root health check
@@ -46,7 +84,15 @@ mcp = FastMCP(
 @mcp.custom_route("/", methods=["GET"])
 async def root(request):
     """Root health check endpoint."""
-    return JSONResponse({"service": "Penpot MCP", "status": "ok", "version": "0.1.0"})
+    return JSONResponse(
+        {
+            "service": "Penpot MCP",
+            "status": "ok",
+            "version": settings.penpot_mcp_version,
+            "protocol_version": settings.mcp_protocol_version,
+            "tool_mode": settings.mcp_tool_mode,
+        }
+    )
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -129,7 +175,7 @@ async def plugin_config(request):
 # ═══════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@_legacy_tool()
 async def list_teams() -> str:
     """List all teams in the Penpot instance with member and project counts."""
     from penpot_mcp.tools.projects import list_teams as _list_teams
@@ -138,7 +184,7 @@ async def list_teams() -> str:
     return json.dumps(result, indent=2)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def list_projects(team_id: str | None = None) -> str:
     """List projects, optionally filtered by team ID.
 
@@ -151,7 +197,7 @@ async def list_projects(team_id: str | None = None) -> str:
     return json.dumps(result, indent=2)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def list_files(project_id: str) -> str:
     """List all files in a project.
 
@@ -164,7 +210,7 @@ async def list_files(project_id: str) -> str:
     return json.dumps(result, indent=2)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def search_files(query: str) -> str:
     """Search files by name across all projects.
 
@@ -182,7 +228,7 @@ async def search_files(query: str) -> str:
 # ═══════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@_legacy_tool()
 async def get_file_summary(file_id: str) -> str:
     """Get detailed metadata for a file (counts, team, project, versions).
 
@@ -195,7 +241,7 @@ async def get_file_summary(file_id: str) -> str:
     return json.dumps(result, indent=2)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def get_file_pages(file_id: str) -> str:
     """Get all pages in a file with their object counts.
 
@@ -208,7 +254,7 @@ async def get_file_pages(file_id: str) -> str:
     return json.dumps(result, indent=2)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def get_file_history(file_id: str, limit: int = 20) -> str:
     """Get revision history of a file.
 
@@ -222,7 +268,7 @@ async def get_file_history(file_id: str, limit: int = 20) -> str:
     return json.dumps(result, indent=2)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def get_file_libraries(file_id: str) -> str:
     """List shared libraries linked to a file.
 
@@ -235,7 +281,7 @@ async def get_file_libraries(file_id: str) -> str:
     return json.dumps(result, indent=2)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def create_project(team_id: str, name: str) -> str:
     """Create a new project in a team.
 
@@ -249,7 +295,7 @@ async def create_project(team_id: str, name: str) -> str:
     return json.dumps(result, indent=2, default=str)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def create_file(project_id: str, name: str) -> str:
     """Create a new design file in a project.
 
@@ -263,7 +309,7 @@ async def create_file(project_id: str, name: str) -> str:
     return json.dumps(result, indent=2, default=str)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def rename_file(file_id: str, name: str) -> str:
     """Rename an existing file.
 
@@ -277,7 +323,7 @@ async def rename_file(file_id: str, name: str) -> str:
     return json.dumps(result, indent=2, default=str)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def duplicate_file(file_id: str, name: str | None = None) -> str:
     """Duplicate an existing file.
 
@@ -291,7 +337,7 @@ async def duplicate_file(file_id: str, name: str | None = None) -> str:
     return json.dumps(result, indent=2, default=str)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def delete_file(file_id: str) -> str:
     """Delete a file (moves to trash).
 
@@ -309,7 +355,7 @@ async def delete_file(file_id: str) -> str:
 # ═══════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@_legacy_tool()
 async def get_page_objects(
     file_id: str, page_id: str, shape_type: str | None = None
 ) -> str:
@@ -328,7 +374,7 @@ async def get_page_objects(
     return json.dumps(result, indent=2)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def get_shape_tree(
     file_id: str, page_id: str, root_id: str | None = None, depth: int = 3
 ) -> str:
@@ -348,7 +394,7 @@ async def get_shape_tree(
     return json.dumps(result, indent=2)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def get_shape_details(file_id: str, page_id: str, shape_id: str) -> str:
     """Get full details of a specific shape (fills, strokes, layout, text content).
 
@@ -363,7 +409,7 @@ async def get_shape_details(file_id: str, page_id: str, shape_id: str) -> str:
     return json.dumps(result, indent=2)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def search_shapes(
     file_id: str, page_id: str, query: str, search_type: str = "name"
 ) -> str:
@@ -381,7 +427,7 @@ async def search_shapes(
     return json.dumps(result, indent=2)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def get_shape_css(file_id: str, page_id: str, shape_id: str) -> str:
     """Get CSS representation of a shape's visual properties.
 
@@ -405,7 +451,7 @@ async def get_shape_css(file_id: str, page_id: str, shape_id: str) -> str:
     )
 
 
-@mcp.tool()
+@_legacy_tool()
 async def get_shape_svg(file_id: str, page_id: str, shape_id: str) -> str:
     """Get SVG representation of a shape.
 
@@ -433,7 +479,7 @@ async def get_shape_svg(file_id: str, page_id: str, shape_id: str) -> str:
 # ═══════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@_legacy_tool()
 async def get_component_instances(file_id: str) -> str:
     """List all components defined in a file.
 
@@ -446,7 +492,7 @@ async def get_component_instances(file_id: str) -> str:
     return json.dumps(result, indent=2)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def get_design_tokens(file_id: str) -> str:
     """Get consolidated design tokens (colors, typographies, component count) from a file.
 
@@ -459,7 +505,7 @@ async def get_design_tokens(file_id: str) -> str:
     return json.dumps(result, indent=2)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def get_colors_library(file_id: str) -> str:
     """Get all colors defined in a file's library.
 
@@ -472,7 +518,7 @@ async def get_colors_library(file_id: str) -> str:
     return json.dumps(result, indent=2)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def create_color(
     file_id: str,
     name: str,
@@ -497,7 +543,7 @@ async def create_color(
     return json.dumps(result, indent=2)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def update_color(
     file_id: str,
     color_id: str,
@@ -524,7 +570,7 @@ async def update_color(
     return json.dumps(result, indent=2)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def delete_color(file_id: str, color_id: str) -> str:
     """Delete a native color asset from a file's local library.
 
@@ -538,7 +584,7 @@ async def delete_color(file_id: str, color_id: str) -> str:
     return json.dumps(result, indent=2)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def get_typography_library(file_id: str) -> str:
     """Get all typographies defined in a file's library.
 
@@ -551,7 +597,7 @@ async def get_typography_library(file_id: str) -> str:
     return json.dumps(result, indent=2)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def create_typography(
     file_id: str,
     name: str,
@@ -589,7 +635,7 @@ async def create_typography(
     return json.dumps(result, indent=2)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def update_typography(
     file_id: str,
     typography_id: str,
@@ -626,7 +672,7 @@ async def update_typography(
     return json.dumps(result, indent=2)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def delete_typography(file_id: str, typography_id: str) -> str:
     """Delete a native typography asset from a file's local library."""
     from penpot_mcp.tools.typographies import delete_typography as _delete_typography
@@ -640,7 +686,7 @@ async def delete_typography(file_id: str, typography_id: str) -> str:
 # ═══════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@_legacy_tool()
 async def get_comments(file_id: str, resolved: bool | None = None) -> str:
     """Get all comments on a file.
 
@@ -654,7 +700,7 @@ async def get_comments(file_id: str, resolved: bool | None = None) -> str:
     return json.dumps(result, indent=2)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def get_active_users(file_id: str) -> str:
     """Get users currently editing a file (real-time presence).
 
@@ -667,7 +713,7 @@ async def get_active_users(file_id: str) -> str:
     return json.dumps(result, indent=2)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def get_share_links(file_id: str) -> str:
     """List share links for a file.
 
@@ -680,7 +726,7 @@ async def get_share_links(file_id: str) -> str:
     return json.dumps(result, indent=2)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def create_comment(
     file_id: str,
     page_id: str,
@@ -705,7 +751,7 @@ async def create_comment(
     return json.dumps(result, indent=2, default=str)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def reply_to_comment(thread_id: str, content: str) -> str:
     """Reply to an existing comment thread.
 
@@ -719,7 +765,7 @@ async def reply_to_comment(thread_id: str, content: str) -> str:
     return json.dumps(result, indent=2, default=str)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def resolve_comment(thread_id: str, resolved: bool = True) -> str:
     """Resolve or unresolve a comment thread.
 
@@ -738,7 +784,7 @@ async def resolve_comment(thread_id: str, resolved: bool = True) -> str:
 # ═══════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@_legacy_tool()
 async def list_media_assets(file_id: str) -> str:
     """List all media assets (images) in a file.
 
@@ -751,7 +797,7 @@ async def list_media_assets(file_id: str) -> str:
     return json.dumps(result, indent=2)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def list_fonts(team_id: str) -> str:
     """List custom fonts uploaded to a team.
 
@@ -764,7 +810,7 @@ async def list_fonts(team_id: str) -> str:
     return json.dumps(result, indent=2)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def upload_media(file_id: str, name: str, url: str) -> str:
     """Upload an image to a file from a URL.
 
@@ -784,7 +830,7 @@ async def upload_media(file_id: str, name: str, url: str) -> str:
 # ═══════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@_legacy_tool()
 async def query_database(sql: str) -> str:
     """Execute a read-only SQL query against the Penpot database.
 
@@ -799,7 +845,7 @@ async def query_database(sql: str) -> str:
     return json.dumps(result, indent=2)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def get_webhooks(team_id: str) -> str:
     """List webhooks configured for a team.
 
@@ -812,7 +858,7 @@ async def get_webhooks(team_id: str) -> str:
     return json.dumps(result, indent=2)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def get_profile() -> str:
     """Get the authenticated user's profile information."""
     result = await api.get_profile()
@@ -824,7 +870,7 @@ async def get_profile() -> str:
 # ═══════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@_legacy_tool()
 async def create_snapshot(file_id: str, label: str) -> str:
     """Create a named snapshot (version) of a file.
 
@@ -836,7 +882,7 @@ async def create_snapshot(file_id: str, label: str) -> str:
     return json.dumps(result, indent=2, default=str)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def get_snapshots(file_id: str) -> str:
     """List all snapshots of a file.
 
@@ -852,7 +898,7 @@ async def get_snapshots(file_id: str) -> str:
 # ═══════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@_legacy_tool()
 async def export_frame_png(
     file_id: str, page_id: str, object_id: str, scale: float = 1.0
 ) -> str:
@@ -872,7 +918,7 @@ async def export_frame_png(
     return json.dumps(result, indent=2, default=str)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def export_frame_svg(file_id: str, page_id: str, object_id: str) -> str:
     """Export a frame or shape to SVG.
 
@@ -895,7 +941,7 @@ async def export_frame_svg(file_id: str, page_id: str, object_id: str) -> str:
 # ═══════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@_legacy_tool()
 async def get_file_raw_data(file_id: str, page_id: str | None = None) -> str:
     """Get the decoded internal data structure of a file.
 
@@ -912,7 +958,7 @@ async def get_file_raw_data(file_id: str, page_id: str | None = None) -> str:
     return json.dumps(result, indent=2, default=str)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def compare_revisions(
     file_id: str, revn_from: int, revn_to: int | None = None
 ) -> str:
@@ -937,7 +983,7 @@ async def compare_revisions(
 # ═══════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@_legacy_tool()
 async def create_rectangle(
     file_id: str,
     page_id: str,
@@ -993,7 +1039,7 @@ async def create_rectangle(
     return json.dumps(result, indent=2, default=str)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def create_frame(
     file_id: str,
     page_id: str,
@@ -1052,7 +1098,7 @@ async def create_frame(
     return json.dumps(result, indent=2, default=str)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def create_ellipse(
     file_id: str,
     page_id: str,
@@ -1105,7 +1151,7 @@ async def create_ellipse(
     return json.dumps(result, indent=2, default=str)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def create_text(
     file_id: str,
     page_id: str,
@@ -1179,7 +1225,7 @@ async def create_text(
     return json.dumps(result, indent=2, default=str)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def create_path(
     file_id: str,
     page_id: str,
@@ -1223,7 +1269,7 @@ async def create_path(
     return json.dumps(result, indent=2, default=str)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def create_group(
     file_id: str,
     page_id: str,
@@ -1246,7 +1292,7 @@ async def create_group(
     return json.dumps(result, indent=2, default=str)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def create_component(
     file_id: str,
     page_id: str,
@@ -1267,7 +1313,7 @@ async def create_component(
     return json.dumps(result, indent=2, default=str)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def create_component_instance(
     file_id: str,
     page_id: str,
@@ -1293,7 +1339,7 @@ async def create_component_instance(
 
 
 
-@mcp.tool()
+@_legacy_tool()
 async def create_page(file_id: str, name: str = "New Page") -> str:
     """Add a new page to a file.
 
@@ -1312,7 +1358,7 @@ async def create_page(file_id: str, name: str = "New Page") -> str:
 # ═══════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@_legacy_tool()
 async def modify_shape(file_id: str, page_id: str, shape_id: str, attrs: dict) -> str:
     """Modify arbitrary attributes of a shape.
 
@@ -1328,7 +1374,7 @@ async def modify_shape(file_id: str, page_id: str, shape_id: str, attrs: dict) -
     return json.dumps(result, indent=2, default=str)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def move_shape(
     file_id: str, page_id: str, shape_id: str, x: float, y: float
 ) -> str:
@@ -1347,7 +1393,7 @@ async def move_shape(
     return json.dumps(result, indent=2, default=str)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def resize_shape(
     file_id: str, page_id: str, shape_id: str, width: float, height: float
 ) -> str:
@@ -1366,7 +1412,7 @@ async def resize_shape(
     return json.dumps(result, indent=2, default=str)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def delete_shape(file_id: str, page_id: str, shape_id: str) -> str:
     """Delete a shape from a page.
 
@@ -1381,7 +1427,7 @@ async def delete_shape(file_id: str, page_id: str, shape_id: str) -> str:
     return json.dumps(result, indent=2, default=str)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def rename_shape(file_id: str, page_id: str, shape_id: str, name: str) -> str:
     """Rename a shape.
 
@@ -1397,7 +1443,7 @@ async def rename_shape(file_id: str, page_id: str, shape_id: str, name: str) -> 
     return json.dumps(result, indent=2, default=str)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def set_fill(
     file_id: str,
     page_id: str,
@@ -1420,7 +1466,7 @@ async def set_fill(
     return json.dumps(result, indent=2, default=str)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def set_stroke(
     file_id: str,
     page_id: str,
@@ -1447,7 +1493,7 @@ async def set_stroke(
     return json.dumps(result, indent=2, default=str)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def set_opacity(file_id: str, page_id: str, shape_id: str, opacity: float) -> str:
     """Set the overall opacity of a shape.
 
@@ -1463,7 +1509,7 @@ async def set_opacity(file_id: str, page_id: str, shape_id: str, opacity: float)
     return json.dumps(result, indent=2, default=str)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def set_layout(
     file_id: str,
     page_id: str,
@@ -1507,7 +1553,7 @@ async def set_layout(
     return json.dumps(result, indent=2, default=str)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def reorder_shapes(
     file_id: str,
     page_id: str,
@@ -1530,7 +1576,7 @@ async def reorder_shapes(
     return json.dumps(result, indent=2, default=str)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def delete_page(file_id: str, page_id: str) -> str:
     """Delete a page from a file.
 
@@ -1544,7 +1590,7 @@ async def delete_page(file_id: str, page_id: str) -> str:
     return json.dumps(result, indent=2, default=str)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def rename_page(file_id: str, page_id: str, name: str) -> str:
     """Rename a page.
 
@@ -1564,7 +1610,7 @@ async def rename_page(file_id: str, page_id: str, name: str) -> str:
 # ═══════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@_legacy_tool()
 async def get_active_selection() -> str:
     """Get the UUIDs of the shapes currently selected by the user in the Penpot Plugin.
 
@@ -1583,7 +1629,7 @@ async def get_active_selection() -> str:
     return json.dumps({"selected_shape_ids": gateway.active_selection}, indent=2)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def execute_plugin_script(script: str) -> str:
     """Execute a JavaScript snippet directly within the user's Penpot Plugin environment.
 
@@ -1613,7 +1659,7 @@ async def execute_plugin_script(script: str) -> str:
 # ═══════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@_legacy_tool()
 async def set_text_content(
     file_id: str,
     page_id: str,
@@ -1654,7 +1700,7 @@ async def set_text_content(
     return json.dumps(result, indent=2, default=str)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def set_font(file_id: str, page_id: str, shape_id: str, font_family: str) -> str:
     """Change the font family of a text shape.
 
@@ -1670,7 +1716,7 @@ async def set_font(file_id: str, page_id: str, shape_id: str, font_family: str) 
     return json.dumps(result, indent=2, default=str)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def set_font_size(
     file_id: str, page_id: str, shape_id: str, font_size: int
 ) -> str:
@@ -1688,7 +1734,7 @@ async def set_font_size(
     return json.dumps(result, indent=2, default=str)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def set_text_align(file_id: str, page_id: str, shape_id: str, align: str) -> str:
     """Set text alignment.
 
@@ -1704,7 +1750,7 @@ async def set_text_align(file_id: str, page_id: str, shape_id: str, align: str) 
     return json.dumps(result, indent=2, default=str)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def set_text_style(
     file_id: str,
     page_id: str,
@@ -1736,7 +1782,7 @@ async def set_text_style(
     return json.dumps(result, indent=2, default=str)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def apply_design_token(
     file_id: str,
     page_id: str,
@@ -1768,7 +1814,7 @@ async def apply_design_token(
     return json.dumps(result, indent=2, default=str)
 
 
-@mcp.tool()
+@_legacy_tool()
 async def auto_bind_library_tokens(
     file_id: str,
     page_id: str,
@@ -1785,6 +1831,36 @@ async def auto_bind_library_tokens(
 
     result = await _bind(file_id, page_id, shape_ids)
     return json.dumps(result, indent=2, default=str)
+
+
+# ═══════════════════════════════════════════════════════════════
+# AEP Compressed Polymorphic Sub-Tools & Mode Registration
+# ═══════════════════════════════════════════════════════════════
+
+from penpot_mcp.tools.subtools import COMPRESSED_SUBTOOLS  # noqa: E402
+
+
+def configure_mcp_tools(mode: str | None = None) -> int:
+    """Configure registered MCP tools according to MCP_TOOL_MODE ('compressed' | 'legacy' | 'hybrid')."""
+    eff_mode = (mode or settings.mcp_tool_mode or "compressed").strip().lower()
+    mcp._tool_manager._tools.clear()
+
+    if eff_mode in ("compressed", "hybrid"):
+        for sub_fn in COMPRESSED_SUBTOOLS:
+            mcp.add_tool(sub_fn)
+
+    if eff_mode in ("legacy", "hybrid"):
+        for leg_fn in _LEGACY_TOOL_FNS:
+            mcp.add_tool(leg_fn)
+
+    if not mcp._tool_manager._tools:
+        for sub_fn in COMPRESSED_SUBTOOLS:
+            mcp.add_tool(sub_fn)
+
+    return len(mcp._tool_manager._tools)
+
+
+configure_mcp_tools(settings.mcp_tool_mode)
 
 
 # ═══════════════════════════════════════════════════════════════

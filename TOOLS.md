@@ -1,6 +1,33 @@
-# Penpot MCP Server — Tool Reference
+# Penpot MCP Server — Tool Reference (v0.3.0)
 
-Complete reference for all **77 tools** provided by the server.
+Complete reference for the **14 compressed polymorphic sub-tools** (`MCP_TOOL_MODE=compressed`, default) and all **77 underlying Penpot actions** (`MCP_TOOL_MODE=legacy` / `hybrid`).
+
+---
+
+## AEP Sub-Tool Compression & Code Mode Overview
+
+By default (`MCP_TOOL_MODE=compressed`), Penpot MCP registers **14 polymorphic domain sub-tools** instead of 77 separate MCP tools. Every sub-tool accepts:
+- `action`: The specific operation to run within that domain.
+- `verbosity`: `"summary"` (default), `"detail"`, `"brief"`, or `"terse"`.
+- `select_fields`: Optional list of dot-paths (e.g., `["status", "shape_id", "items.0.id"]`) for server-side field projection.
+- `session_id` / `store_as`: Optional RAM `SessionPool` slot caching so downstream steps can reference `$cache.<slot>.<path>`.
+
+| Compressed Sub-Tool | Underlying Actions (`action=...`) |
+|---|---|
+| `discover` | `capabilities`, `discover`, `schema`, `playbook` |
+| `projects` | `list_teams`, `list_projects`, `create_project`, `list_files`, `search_files` |
+| `files` | `summary`, `pages`, `history`, `libraries`, `raw_data`, `compare_revisions`, `create`, `rename`, `delete`, `duplicate`, `create_page`, `delete_page` |
+| `shapes` | `tree`, `details`, `css`, `svg`, `layout`, `search` |
+| `create` | `rectangle`, `ellipse`, `frame`, `text`, `path`, `group`, `clone`, `component_instance`, `from_svg` |
+| `modify` | `move`, `resize`, `fill`, `stroke`, `opacity`, `rotation`, `shadow`, `blur`, `border_radius`, `layout`, `delete`, `rename` |
+| `text` | `get`, `set_content`, `set_font`, `set_font_size`, `set_align` |
+| `assets` | `components`, `colors`, `typographies`, `create_component`, `create_color`, `update_color`, `delete_color`, `create_typography`, `update_typography`, `delete_typography`, `apply_token`, `auto_bind_tokens` |
+| `comments` | `list_threads`, `thread_comments`, `create`, `reply`, `resolve`, `delete_thread` |
+| `media` | `list_media`, `upload`, `list_fonts` |
+| `export` | `png`, `svg` |
+| `system` | `query_db`, `profile`, `webhooks`, `snapshots`, `create_snapshot` |
+| `plugin` | `selection`, `execute_script` |
+| `playbook_run` | `batch`, `code`, `run`, `create`, `list`, `dag_audit` |
 
 ---
 

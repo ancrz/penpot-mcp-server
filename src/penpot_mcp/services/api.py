@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 import re
+import socket
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
@@ -13,6 +16,173 @@ from penpot_mcp.config import settings
 from penpot_mcp.services.transit import decode_transit
 
 logger = logging.getLogger(__name__)
+
+_RPC_METHOD_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+
+_BLOCKED_INTERNAL_HOSTS = frozenset(
+    {
+        "localhost",
+        "localhost.localdomain",
+        "metadata",
+        "metadata.google.internal",
+        "instance-data",
+        "host.docker.internal",
+        "gateway.docker.internal",
+        "penpot-postgres",
+        "penpot-redis",
+        "penpot-backend",
+        "penpot-frontend",
+        "penpot-exporter",
+        "penpot-mailcatch",
+        "penpot-mcp",
+    }
+)
+
+
+def _check_ip_ssrf(ip_obj: ipaddress.IPv4Address | ipaddress.IPv6Address, *, allow_private: bool) -> None:
+    """Reject loopback, link-local (cloud metadata), unspecified, multicast, and private IPs."""
+    if (
+        ip_obj.is_loopback
+        or ip_obj.is_link_local
+        or ip_obj.is_unspecified
+        or ip_obj.is_multicast
+    ):
+        raise ValueError(f"SSRF guard blocked restricted IP address: {ip_obj}")
+    if not allow_private and (ip_obj.is_private or ip_obj.is_reserved):
+        raise ValueError(f"SSRF guard blocked private/reserved IP address: {ip_obj}")
+
+
+def validate_rpc_method(method: str) -> str:
+    """Validate Penpot RPC command name to prevent path traversal or query injection."""
+    clean = (method or "").strip()
+    if not _RPC_METHOD_RE.fullmatch(clean):
+        raise ValueError(f"Invalid Penpot RPC command name: {method!r}")
+    return clean
+
+
+def validate_penpot_endpoint_url(url: str, *, field_name: str = "url") -> str:
+    """Validate configured Penpot base/public endpoint URLs."""
+    raw = (url or "").strip()
+    if not raw or any( ord(c) < 32 for c in raw ):
+        raise ValueError(f"Invalid {field_name}: empty or contains control characters")
+    parsed = urlsplit(raw)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"Invalid {field_name} scheme {parsed.scheme!r}: only http/https allowed")
+    if not parsed.hostname:
+        raise ValueError(f"Invalid {field_name}: missing hostname")
+    if parsed.username or parsed.password:
+        raise ValueError(f"Invalid {field_name}: embedded credentials are not allowed")
+    return raw.rstrip("/")
+
+
+def validate_external_media_url(
+    url: str,
+    *,
+    allow_private: bool | None = None,
+    resolve_dns: bool = False,
+) -> str:
+    """Validate external media URL against Server-Side Request Forgery (SSRF)."""
+    eff_allow_private = (
+        settings.ssrf_allow_private_media if allow_private is None else allow_private
+    )
+    raw = (url or "").strip()
+    if not raw or any(ord(c) <= 32 for c in raw):
+        raise ValueError("Invalid media URL: empty or contains whitespace/control characters")
+
+    parsed = urlsplit(raw)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(
+            f"SSRF guard blocked scheme {parsed.scheme!r}: only http and https are allowed"
+        )
+    if not parsed.hostname:
+        raise ValueError("Invalid media URL: missing hostname")
+    if parsed.username or parsed.password:
+        raise ValueError("SSRF guard blocked URL with embedded credentials")
+    if parsed.fragment:
+        raise ValueError("Invalid media URL: URL fragments are not permitted")
+
+    host = parsed.hostname.lower().rstrip(".")
+    if (
+        host in _BLOCKED_INTERNAL_HOSTS
+        or host.endswith((".localhost", ".local", ".internal"))
+    ):
+        raise ValueError(f"SSRF guard blocked internal hostname: {host}")
+
+    try:
+        ip_obj = ipaddress.ip_address(host)
+    except ValueError:
+        ip_obj = None
+
+    if ip_obj is not None:
+        _check_ip_ssrf(ip_obj, allow_private=eff_allow_private)
+    elif resolve_dns:
+        try:
+            infos = socket.getaddrinfo(host, parsed.port or (443 if parsed.scheme == "https" else 80), proto=socket.IPPROTO_TCP)
+        except socket.gaierror as exc:
+            raise ValueError(f"Could not resolve media URL hostname {host!r}: {exc}") from exc
+        for info in infos:
+            resolved_ip = ipaddress.ip_address(info[4][0])
+            _check_ip_ssrf(resolved_ip, allow_private=eff_allow_private)
+
+    return raw
+
+
+def validate_export_redirect_uri(uri: str, base_url: str, public_url: str) -> str:
+    """Validate and normalize an exporter asset URI so it only targets the configured Penpot origin."""
+    raw = (uri or "").strip()
+    if not raw or any(ord(c) <= 32 for c in raw):
+        raise ValueError("Invalid export URI")
+
+    if raw.startswith("/"):
+        if raw.startswith("//") or ".." in raw.split("/"):
+            raise ValueError(f"SSRF guard blocked unsafe relative export URI: {raw!r}")
+        return raw
+
+    parsed_uri = urlsplit(raw)
+    if parsed_uri.scheme not in ("http", "https") or not parsed_uri.netloc:
+        raise ValueError(f"SSRF guard blocked non-HTTP export URI: {raw!r}")
+    if parsed_uri.username or parsed_uri.password:
+        raise ValueError("SSRF guard blocked export URI with embedded credentials")
+    if ".." in parsed_uri.path.split("/"):
+        raise ValueError("SSRF guard blocked path traversal in export URI")
+
+    base_parsed = urlsplit(validate_penpot_endpoint_url(base_url, field_name="penpot_base_url"))
+    pub_parsed = (
+        urlsplit(validate_penpot_endpoint_url(public_url, field_name="penpot_public_url"))
+        if public_url
+        else None
+    )
+
+    uri_origin = (parsed_uri.scheme.lower(), parsed_uri.netloc.lower())
+    base_origin = (base_parsed.scheme.lower(), base_parsed.netloc.lower())
+    pub_origin = (
+        (pub_parsed.scheme.lower(), pub_parsed.netloc.lower()) if pub_parsed else None
+    )
+
+    if uri_origin == pub_origin:
+        return urlunsplit(
+            (
+                base_parsed.scheme,
+                base_parsed.netloc,
+                parsed_uri.path,
+                parsed_uri.query,
+                "",
+            )
+        )
+    if uri_origin == base_origin:
+        return urlunsplit(
+            (
+                base_parsed.scheme,
+                base_parsed.netloc,
+                parsed_uri.path,
+                parsed_uri.query,
+                "",
+            )
+        )
+
+    raise ValueError(
+        f"SSRF guard blocked untrusted export redirect origin: {parsed_uri.scheme}://{parsed_uri.netloc}"
+    )
 
 _UUID_RE = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
@@ -122,10 +292,17 @@ class PenpotAPI:
         self._session_token: str | None = None
 
     async def connect(self) -> None:
+        validated_base_url = validate_penpot_endpoint_url(
+            settings.penpot_base_url, field_name="penpot_base_url"
+        )
+        if settings.penpot_public_url:
+            validate_penpot_endpoint_url(
+                settings.penpot_public_url, field_name="penpot_public_url"
+            )
         self._client = httpx.AsyncClient(
-            base_url=settings.penpot_base_url,
+            base_url=validated_base_url,
             timeout=30.0,
-            follow_redirects=True,
+            follow_redirects=False,
         )
         if settings.has_access_token:
             self._client.headers["Authorization"] = (
@@ -158,7 +335,8 @@ class PenpotAPI:
     async def command(self, method: str, params: dict[str, Any] | None = None) -> Any:
         """Execute an RPC command against Penpot backend."""
         assert self._client is not None, "API client not connected"
-        url = f"/api/rpc/command/{method}"
+        safe_method = validate_rpc_method(method)
+        url = f"/api/rpc/command/{safe_method}"
         if params:
             resp = await self._client.post(url, json=params)
         else:
@@ -312,9 +490,10 @@ class PenpotAPI:
     # ── Media ────────────────────────────────────────────────
 
     async def upload_media(self, file_id: str, name: str, url: str) -> dict:
+        safe_url = validate_external_media_url(url)
         return await self.command(
             "create-file-media-object-from-url",
-            {"file-id": file_id, "name": name, "url": url},
+            {"file-id": file_id, "name": name, "url": safe_url},
         )
 
     # ── Snapshots ────────────────────────────────────────────
@@ -415,12 +594,12 @@ class PenpotAPI:
             elif isinstance(result, dict):
                 uri = result.get("uri") or result.get("~#uri")
             if uri:
-                # Rewrite public URL to internal URL for Docker networking
-                public_url = settings.penpot_public_url.rstrip("/")
-                internal_url = settings.penpot_base_url.rstrip("/")
-                if public_url and uri.startswith(public_url):
-                    uri = uri.replace(public_url, internal_url, 1)
-                file_resp = await self._client.get(uri, timeout=60.0)
+                safe_uri = validate_export_redirect_uri(
+                    str(uri),
+                    settings.penpot_base_url,
+                    settings.penpot_public_url,
+                )
+                file_resp = await self._client.get(safe_uri, timeout=60.0)
                 file_resp.raise_for_status()
                 return file_resp.content
             return resp.content
