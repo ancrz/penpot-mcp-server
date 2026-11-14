@@ -277,6 +277,15 @@ func (h *Hub) handleDispatch(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "-healthcheck" {
+		client := &http.Client{Timeout: 3 * time.Second}
+		resp, err := client.Get("http://127.0.0.1:4402/ws/health")
+		if err != nil || resp.StatusCode != http.StatusOK {
+			os.Exit(1)
+		}
+		_ = resp.Body.Close()
+		os.Exit(0)
+	}
 	addr := os.Getenv("WS_GO_ADDR")
 	if addr == "" {
 		addr = ":4402"

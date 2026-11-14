@@ -1,13 +1,19 @@
-FROM python:3.14-alpine
+FROM python:3.14-slim
 
-RUN apk add --no-cache ffmpeg && \
-    adduser -D -u 1000 appuser && \
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends ffmpeg && \
+    rm -rf /var/lib/apt/lists/* && \
+    useradd --create-home --uid 1000 --shell /usr/sbin/nologin appuser && \
     mkdir -p /sandbox /app && \
     chown -R appuser:appuser /sandbox /app
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir "mcp[cli]>=1.30.0,<2" "uvicorn>=0.54.0" "starlette>=0.46.0"
+RUN pip install --no-cache-dir "mcp[cli]>=1.30.0,<2" "uvicorn>=0.54.0" "starlette>=0.46.0" && \
+    rm -rf /usr/local/lib/python*/site-packages/pip* \
+           /usr/local/lib/python*/site-packages/setuptools* \
+           /usr/local/lib/python*/site-packages/wheel*
 
 COPY src/penpot_mcp/code_mode.py /app/code_mode.py
 COPY src/penpot_mcp/ffmpeg_mcp_server.py /app/ffmpeg_mcp_server.py
@@ -18,4 +24,6 @@ ENV SANDBOX_ROOT=/sandbox \
     FFMPEG_MCP_PORT=8890
 
 EXPOSE 8890
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD ["python", "-c", "import os, socket; s = socket.create_connection(('127.0.0.1', int(os.environ.get('FFMPEG_MCP_PORT', '8890'))), timeout=3); s.close()"]
 CMD ["python", "/app/ffmpeg_mcp_server.py"]

@@ -1,7 +1,10 @@
-FROM python:3.14-alpine
+FROM python:3.14-slim
 
-RUN apk add --no-cache poppler-utils && \
-    adduser -D -u 1000 appuser && \
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends poppler-utils && \
+    rm -rf /var/lib/apt/lists/* && \
+    useradd --create-home --uid 1000 --shell /usr/sbin/nologin appuser && \
     mkdir -p /sandbox /app && \
     chown -R appuser:appuser /sandbox /app
 
@@ -14,7 +17,10 @@ RUN pip install --no-cache-dir \
     "pillow>=11.0.0" \
     "pypdf>=5.0.0" \
     "openpyxl>=3.1.5" \
-    "python-docx>=1.1.2"
+    "python-docx>=1.1.2" && \
+    rm -rf /usr/local/lib/python*/site-packages/pip* \
+           /usr/local/lib/python*/site-packages/setuptools* \
+           /usr/local/lib/python*/site-packages/wheel*
 
 COPY src/penpot_mcp/code_mode.py /app/code_mode.py
 COPY src/penpot_mcp/suite_mcp_server.py /app/suite_mcp_server.py
@@ -25,4 +31,6 @@ ENV SANDBOX_ROOT=/sandbox \
     SUITE_MCP_PORT=8891
 
 EXPOSE 8891
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD ["python", "-c", "import os, socket; s = socket.create_connection(('127.0.0.1', int(os.environ.get('SUITE_MCP_PORT', '8891'))), timeout=3); s.close()"]
 CMD ["python", "/app/suite_mcp_server.py"]
