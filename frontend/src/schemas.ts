@@ -86,7 +86,24 @@ export const PgvectorVisionResponseSchema = z.object({
   prompt_summary: z.string().optional().default(""),
 });
 
+export const UploadedAttachmentSchema = z.object({
+  id: z.string(),
+  filename: z.string(),
+  kind: z.string().default("file"),
+  size_bytes: z.number().default(0),
+  summary: z.string().default(""),
+  imported_to_penpot: z.boolean().optional(),
+  import_error: z.string().optional(),
+});
+
+export const UploadResponseSchema = z.object({
+  status: z.string(),
+  attachment: UploadedAttachmentSchema.optional(),
+  error: z.string().optional(),
+});
+
 export type AgentStatus = z.infer<typeof AgentStatusSchema>;
 export type AgentChatResponse = z.infer<typeof AgentChatResponseSchema>;
 export type PenpotUserRow = z.infer<typeof PenpotUserRowSchema>;
 export type PgvectorVisionResponse = z.infer<typeof PgvectorVisionResponseSchema>;
+export type UploadedAttachment = z.infer<typeof UploadedAttachmentSchema>;

@@ -1296,6 +1296,7 @@ class PenpotAgentGateway:
             "resolved_via": "default",
         }
         self.user_profiles_cache: dict[str, dict[str, Any]] = {}
+        self.attachments_cache: dict[str, dict[str, Any]] = {}
         self._seed_from_env()
         self._load_persisted_state()
 
@@ -2453,6 +2454,7 @@ class PenpotAgentGateway:
         session_id: str | None = None,
         quick_action: str | None = None,
         history: list[dict[str, Any]] | None = None,
+        attachment_ids: list[str] | None = None,
     ) -> AgentTurnResult:
         """Run an end-to-end Penpot AI Studio turn with multi-user profile isolation and pgvector Canvas Vision."""
         from penpot_mcp.services.vision import sync_and_query_canvas_vision
@@ -2532,6 +2534,18 @@ class PenpotAgentGateway:
         )
         eye_block = str(vision_ctx.get("prompt_eye_summary") or "")
         rec_xy = vision_ctx.get("recommended_free_origin") or {"x": 80.0, "y": 80.0}
+        att_blocks: list[str] = []
+        for aid in (attachment_ids or [])[:5]:
+            att = self.attachments_cache.get(str(aid))
+            if att and att.get("context_text"):
+                att_blocks.append(str(att["context_text"]))
+        attachments_section = (
+            "\n\n=== ATTACHED FILES & TEMPLATES CONTEXT ===\n"
+            + "\n---\n".join(att_blocks)
+            + "\n==========================================="
+            if att_blocks
+            else ""
+        )
         system_prompt = (
             "You are Penpot AI Studio, an expert UI/UX design agent embedded inside Penpot via the "
             "Penpot MCP Hybrid Gateway and SDK Agent Pipeline.\n"
@@ -2554,6 +2568,7 @@ class PenpotAgentGateway:
             f"call `create_ui_artifact` or `run_penpot_batch` immediately (using free coordinates x={rec_xy.get('x', 80)}, y={rec_xy.get('y', 80)} so you do not overlap existing frames).\n"
             "2. You CAN see the canvas via the PGVECTOR SEMANTIC & SPATIAL CANVAS VISION EYE above! When the user asks what is on the canvas or refers to a specific shape/color/text, use the exact shape_id, coordinates, colors, and texts from the Vision Eye (or call `query_canvas_vision_pgvector` / `call_penpot_branch_tool`).\n"
             "3. Keep your final response concise and in the user's language (Spanish or English)."
+            f"{attachments_section}"
             f"{addendum_block}"
         )
 

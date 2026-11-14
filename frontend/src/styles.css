@@ -516,6 +516,93 @@ body {
   white-space: nowrap;
 }
 
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.drop-active {
+  outline: 2px dashed var(--sky);
+  outline-offset: -4px;
+  background: rgba(56, 189, 248, 0.06);
+}
+
+.attach-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 16px;
+  background: var(--bg-1);
+  border-top: 1px solid var(--border);
+}
+
+.attach-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-0);
+  max-width: 100%;
+}
+
+.attach-remove {
+  background: none;
+  border: none;
+  color: var(--text-1);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.attach-remove:hover {
+  color: var(--text-0);
+}
+
+.attach-pill {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--ok-text);
+  background: var(--ok-soft);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  border-radius: 6px;
+  padding: 4px 8px;
+  display: inline-block;
+}
+
+.composer-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.import-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-1);
+  cursor: pointer;
+  user-select: none;
+}
+
+.import-toggle input[type="checkbox"] {
+  accent-color: var(--sky);
+}
+
 /* Cards & Forms */
 .card {
   background: var(--bg-1);

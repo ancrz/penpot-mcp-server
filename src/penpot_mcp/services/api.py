@@ -610,6 +610,22 @@ class PenpotAPI:
     async def create_access_token(self, name: str) -> dict:
         return await self.command("create-access-token", {"name": name})
 
+    async def import_binfile(self, project_id: str, filename: str, raw_bytes: bytes) -> dict:
+        """Import a .penpot binary/archive template into a Penpot project."""
+        assert self._client is not None, "API client not connected"
+        resp = await self._client.post(
+            "/api/main/methods/import-binfile",
+            data={"project-id": project_id},
+            files={"file": (filename, raw_bytes, "application/zip")},
+            headers={"Accept": "application/json"},
+        )
+        if resp.status_code >= 400:
+            raise RuntimeError(f"import-binfile HTTP {resp.status_code}: {resp.text[:300]}")
+        try:
+            return resp.json()
+        except Exception:
+            return {"status": "imported", "raw": resp.text[:300]}
+
 
 # Singleton
 api = PenpotAPI()

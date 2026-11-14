@@ -285,8 +285,86 @@ async def agent_chat_route(request):
         session_id=payload.get("session_id"),
         quick_action=quick_action,
         history=payload.get("history") if isinstance(payload.get("history"), list) else None,
+        attachment_ids=(
+            [str(x) for x in payload["attachment_ids"]]
+            if isinstance(payload.get("attachment_ids"), list)
+            else None
+        ),
     )
     return JSONResponse(asdict(turn), headers=_cors_headers())
+
+
+@mcp.custom_route("/agent/upload", methods=["POST", "OPTIONS"])
+async def agent_upload_route(request):
+    """Upload a .penpot template, SVG, JSON, text, or image for chat context / Penpot import."""
+    from starlette.responses import Response
+    from penpot_mcp.agent_gateway import agent_gateway
+    from penpot_mcp.services.attachments import parse_uploaded_attachment
+
+    if request.method == "OPTIONS":
+        return Response(status_code=204, headers=_cors_headers())
+    try:
+        form = await request.form()
+        upload = form.get("file")
+        if upload is None or not hasattr(upload, "read"):
+            return JSONResponse(
+                {"status": "PARAM_ERROR", "error": "Field 'file' (multipart/form-data) is required."},
+                status_code=422,
+                headers=_cors_headers(),
+            )
+        raw_bytes = await upload.read()
+        filename = str(getattr(upload, "filename", "") or "upload.bin")
+        content_type = str(getattr(upload, "content_type", "") or "")
+        import_flag = str(form.get("import_to_penpot") or "").strip().lower() in ("1", "true", "yes")
+        project_id = str(form.get("project_id") or "").strip()
+
+        att = parse_uploaded_attachment(
+            filename=filename,
+            content_bytes=raw_bytes,
+            content_type=content_type,
+        )
+
+        # Keep bounded cache (50 items) in gateway memory for chat context injection
+        if len(agent_gateway.attachments_cache) >= 50:
+            oldest_key = next(iter(agent_gateway.attachments_cache))
+            agent_gateway.attachments_cache.pop(oldest_key, None)
+        agent_gateway.attachments_cache[att["id"]] = att
+
+        if import_flag and att.get("kind") == "penpot_template":
+            try:
+                if not project_id:
+                    project_id = str(agent_gateway.active_user.get("default_project_id") or "")
+                if not project_id:
+                    teams = await api.list_teams()
+                    if teams:
+                        projs = await api.list_projects(str(teams[0]["id"]))
+                        if projs:
+                            project_id = str(projs[0]["id"])
+                if project_id:
+                    imp = await api.import_binfile(project_id, att["filename"], raw_bytes)
+                    att["imported_to_penpot"] = True
+                    att["import_result"] = imp
+                else:
+                    att["imported_to_penpot"] = False
+                    att["import_error"] = "No se encontró un project_id destino."
+            except Exception as exc:
+                att["imported_to_penpot"] = False
+                att["import_error"] = str(exc)
+
+        public_att = {k: v for k, v in att.items() if k != "image_base64"}
+        return JSONResponse({"status": "OK", "attachment": public_att}, headers=_cors_headers())
+    except ValueError as exc:
+        return JSONResponse(
+            {"status": "PARAM_ERROR", "error": str(exc)},
+            status_code=422,
+            headers=_cors_headers(),
+        )
+    except Exception as exc:
+        return JSONResponse(
+            {"status": "ERROR", "error": str(exc)},
+            status_code=500,
+            headers=_cors_headers(),
+        )
 
 
 @mcp.custom_route("/agent/breakers/reset", methods=["POST", "OPTIONS"])

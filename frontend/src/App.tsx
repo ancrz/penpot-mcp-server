@@ -1,4 +1,4 @@
-import { FormEvent, KeyboardEvent, useCallback, useEffect, useId, useRef, useState } from "react";
+import { ChangeEvent, DragEvent, FormEvent, KeyboardEvent, useCallback, useEffect, useId, useRef, useState } from "react";
 import {
   AgentChatResponse,
   AgentChatResponseSchema,
@@ -8,12 +8,15 @@ import {
   PenpotUsersResponseSchema,
   PgvectorVisionResponse,
   PgvectorVisionResponseSchema,
+  UploadedAttachment,
+  UploadResponseSchema,
 } from "./schemas";
 
 interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   text: string;
+  attachments?: UploadedAttachment[];
   trace?: AgentChatResponse["tool_trace"];
   createdShapes?: AgentChatResponse["created_shapes"];
   latencyMs?: number;
@@ -82,6 +85,11 @@ export default function App() {
   ]);
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
+  const [attachments, setAttachments] = useState<UploadedAttachment[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [importPenpot, setImportPenpot] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Config & Users & pgvector state
   const [users, setUsers] = useState<PenpotUserRow[]>([]);
@@ -184,21 +192,76 @@ export default function App() {
     feedEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages.length, busy]);
 
+  const uploadFiles = async (fileList: FileList | null) => {
+    if (!fileList || fileList.length === 0) return;
+    setUploading(true);
+    try {
+      for (const file of Array.from(fileList)) {
+        const fd = new FormData();
+        fd.append("file", file);
+        if (importPenpot && file.name.toLowerCase().endsWith(".penpot")) {
+          fd.append("import_to_penpot", "true");
+        }
+        const res = await fetch("/agent/upload", { method: "POST", body: fd });
+        const parsed = UploadResponseSchema.parse(await res.json());
+        if (parsed.status === "OK" && parsed.attachment) {
+          const att = parsed.attachment;
+          setAttachments((prev) => [...prev, att]);
+          showToast(
+            att.imported_to_penpot
+              ? `Plantilla ${att.filename} importada a Penpot y adjuntada al chat`
+              : `Adjuntado al contexto: ${att.filename}`
+          );
+        } else {
+          showToast(`Error al adjuntar ${file.name}: ${parsed.error || "formato inválido"}`);
+        }
+      }
+    } catch (err) {
+      showToast(`Error subiendo archivo: ${String(err)}`);
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+    void uploadFiles(e.target.files);
+  };
+
+  const handleDrop = (e: DragEvent<HTMLElement>) => {
+    e.preventDefault();
+    setDragActive(false);
+    void uploadFiles(e.dataTransfer.files);
+  };
+
   const sendPrompt = async (text: string, quickAction?: string) => {
     const trimmed = text.trim();
-    if (!trimmed || busy) return;
+    if ((!trimmed && attachments.length === 0) || busy) return;
+    const activeAttachments = [...attachments];
+    const effectiveText = trimmed || `Analiza los archivos adjuntos (${activeAttachments.map((a) => a.filename).join(", ")}).`;
     setActiveTab("chat");
     setBusy(true);
     setMessages((prev) => [
       ...prev,
-      { id: `u-${Date.now()}`, role: "user", text: trimmed, timestamp: nowLabel() },
+      {
+        id: `u-${Date.now()}`,
+        role: "user",
+        text: effectiveText,
+        attachments: activeAttachments,
+        timestamp: nowLabel(),
+      },
     ]);
     setPrompt("");
+    setAttachments([]);
     try {
       const res = await fetch("/agent/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: trimmed, quick_action: quickAction }),
+        body: JSON.stringify({
+          prompt: effectiveText,
+          quick_action: quickAction,
+          attachment_ids: activeAttachments.map((a) => a.id),
+        }),
       });
       const parsed = AgentChatResponseSchema.parse(await res.json());
       setMessages((prev) => [
@@ -397,7 +460,13 @@ export default function App() {
           id={`${baseId}-panel-chat`}
           aria-labelledby={`${baseId}-tab-chat`}
           hidden={activeTab !== "chat"}
-          className="panel-chat"
+          className={`panel-chat ${dragActive ? "drop-active" : ""}`}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragActive(true);
+          }}
+          onDragLeave={() => setDragActive(false)}
+          onDrop={handleDrop}
         >
           <div className="quick-strip" aria-label="Acciones rápidas de diseño">
             {QUICK_ACTIONS.map((qa) => (
@@ -444,6 +513,15 @@ export default function App() {
                   <span className="msg-time">{m.timestamp}</span>
                 </div>
                 <div className="msg-body">{m.text}</div>
+                {m.attachments && m.attachments.length > 0 && (
+                  <div className="shapes-row">
+                    {m.attachments.map((att) => (
+                      <span key={att.id} className="attach-pill">
+                        📎 {att.filename} ({att.kind})
+                      </span>
+                    ))}
+                  </div>
+                )}
                 {m.createdShapes && m.createdShapes.length > 0 && (
                   <div className="shapes-row">
                     {m.createdShapes.map((s) => (
@@ -470,8 +548,56 @@ export default function App() {
             <div ref={feedEndRef} />
           </div>
 
+          {attachments.length > 0 && (
+            <div className="attach-bar" aria-label="Archivos adjuntos al contexto">
+              {attachments.map((att) => (
+                <span key={att.id} className="attach-chip">
+                  <span>
+                    📎 {att.filename} · {att.summary || att.kind}
+                  </span>
+                  <button
+                    type="button"
+                    className="attach-remove"
+                    aria-label={`Quitar ${att.filename}`}
+                    onClick={() => setAttachments((prev) => prev.filter((x) => x.id !== att.id))}
+                  >
+                    ✕
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+
           <form className="composer" onSubmit={handleChatSubmit}>
+            <input
+              ref={fileInputRef}
+              id={`${baseId}-file-upload`}
+              type="file"
+              className="visually-hidden"
+              multiple
+              accept=".penpot,.svg,.json,.md,.txt,.css,.html,.png,.jpg,.jpeg,.webp"
+              onChange={handleFileChange}
+            />
             <div className="composer-input-wrap">
+              <div className="composer-toolbar">
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-nowrap"
+                  disabled={uploading || busy}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  {uploading ? "Subiendo..." : "📎 Adjuntar (.penpot / SVG / JSON / Img)"}
+                </button>
+                <label className="import-toggle" htmlFor={`${baseId}-import-penpot`}>
+                  <input
+                    id={`${baseId}-import-penpot`}
+                    type="checkbox"
+                    checked={importPenpot}
+                    onChange={(e) => setImportPenpot(e.target.checked)}
+                  />
+                  <span>Importar .penpot al proyecto</span>
+                </label>
+              </div>
               <label htmlFor={`${baseId}-prompt`} className="visually-hidden">
                 Instrucción para el agente de Penpot
               </label>
@@ -481,12 +607,16 @@ export default function App() {
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
                 onKeyDown={handleComposerKeyDown}
-                placeholder="Describe el componente, layout o acción en Penpot... (Enter para enviar)"
+                placeholder="Describe el componente o suelta una plantilla .penpot / SVG / imagen aquí... (Enter para enviar)"
                 rows={2}
               />
-              <span className="composer-hint">Enter enviar · Shift+Enter nueva línea</span>
+              <span className="composer-hint">Enter enviar · Shift+Enter nueva línea · Arrastra archivos para adjuntar</span>
             </div>
-            <button className="btn btn-primary btn-send" type="submit" disabled={busy || !prompt.trim()}>
+            <button
+              className="btn btn-primary btn-send"
+              type="submit"
+              disabled={busy || uploading || (!prompt.trim() && attachments.length === 0)}
+            >
               {busy ? "Procesando..." : "Generar →"}
             </button>
           </form>
