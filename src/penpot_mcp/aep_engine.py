@@ -1,26 +1,24 @@
-"""AEP MCP Optimization Engine for Penpot MCP Server (RE: agent-execution-plane).
+"""MCP Optimization Layer for Penpot MCP Server.
 
-Provides pure-stdlib, zero-cycle primitives adapted from Agent Execution Plane (AEP):
-  - RequestTelemetry & attach_envelope: per-request latency/token/RSS/FD attribution,
-    compact verbosity modes ('summary' | 'detail' | 'brief' | 'terse'), and payload clamping.
-  - SessionPool (GLOBAL_SESSION_POOL): thread-safe shared-memory (/dev/shm/penpot_mcp_pool)
-    warm session slots and key-value state caching (`store_as`, `session_id`).
+Provides pure in-memory, stdlib-only optimization primitives for toolset routing
+and Code Mode batch execution (zero OS/process/filesystem primitives):
+  - RequestTelemetry & attach_envelope: per-request wall-clock latency and token
+    estimation, compact verbosity modes ('summary' | 'detail' | 'brief' | 'terse'),
+    and JSON payload clamping.
+  - SessionPool (GLOBAL_SESSION_POOL): thread-safe in-memory session state cache
+    (`store_as`, `session_id`) for multi-step design workflows.
   - resolve_step_refs & hydrate_struct: native-type-preserving variable piping
     (`$prev.*`, `$steps.<id>.*`, `$cache.<key>.*`, `$slot.<key>.*`, `${var}`).
   - project_fields: server-side dot-path field projection (`select_fields`) with
     token-savings estimation.
-  - ToposGuard: DAG cycle detection and Kahn topological ordering for `playbook_run`
-    ephemeral batch / code mode.
+  - ToposGuard: DAG cycle detection and topological step ordering for multi-step
+    batch execution (`playbook_run`).
 """
 
 from __future__ import annotations
 
-import contextlib
 import json
-import os
-from pathlib import Path
 import re
-import shutil
 import threading
 import time
 from typing import Any
@@ -32,44 +30,21 @@ DEFAULT_LEASE_TTL_SEC = 120.0
 
 
 # ═══════════════════════════════════════════════════════════════
-# 1. Per-Request Telemetry & Normalized Agent-Brief Envelope
+# 1. Per-Request Latency/Token Telemetry & Response Envelope
 # ═══════════════════════════════════════════════════════════════
 
 
-def _self_resources() -> tuple[int, int]:
-    """Return (rss_kb, fd_count) for the current process in <0.1ms."""
-    rss_kb = 0
-    fd_count = 0
-    with contextlib.suppress(OSError, ValueError):
-        status_path = Path("/proc/self/status")
-        if status_path.exists():
-            for line in status_path.read_text(encoding="utf-8", errors="replace").splitlines():
-                if line.startswith("VmRSS:"):
-                    parts = line.split(":", 1)[1].strip().split()
-                    if parts:
-                        rss_kb = int(parts[0])
-                    break
-    with contextlib.suppress(OSError):
-        fd_count = len(os.listdir("/proc/self/fd"))
-    return rss_kb, fd_count
-
-
-_STARTUP_RSS_KB, _STARTUP_FD_COUNT = _self_resources()
-
-
 class RequestTelemetry:
-    """Measures wall-clock latency, RSS delta, FD delta, serialized bytes, and estimated tokens."""
+    """Measures wall-clock latency, serialized bytes, and estimated tokens in pure Python."""
 
     def __init__(self, tool_name: str, action: str = "default") -> None:
         self.request_id = f"req_{uuid.uuid4().hex[:10]}"
         self.tool_name = tool_name
         self.action = action
         self.start_ns = time.perf_counter_ns()
-        self.rss_before_kb, self.fd_before = _self_resources()
 
     def finish(self, serialized_bytes: int) -> dict[str, Any]:
         elapsed_ms = round((time.perf_counter_ns() - self.start_ns) / 1_000_000, 2)
-        rss_after_kb, fd_after = _self_resources()
         return {
             "request_id": self.request_id,
             "tool": self.tool_name,
@@ -77,11 +52,6 @@ class RequestTelemetry:
             "latency_ms": elapsed_ms,
             "output_bytes": serialized_bytes,
             "estimated_tokens": max(1, round(serialized_bytes / 4)),
-            "rss_kb": rss_after_kb,
-            "rss_delta_kb": rss_after_kb - self.rss_before_kb,
-            "rss_since_startup_kb": rss_after_kb - _STARTUP_RSS_KB,
-            "fd_count": fd_after,
-            "fd_delta": fd_after - self.fd_before,
         }
 
 
@@ -162,7 +132,7 @@ def attach_envelope(
     cursor: str | None = None,
     telemetry: bool | None = None,
 ) -> str:
-    """Attach telemetry, field projection, and normalized agent-brief envelope fields."""
+    """Attach latency/token metrics, field projection, and normalized envelope fields."""
     mode = (verbosity or "summary").strip().lower()
     status_val = str(payload.get("status") or payload.get("verdict") or "OK")
     sev = str(severity or payload.get("severity") or infer_severity(status_val))
@@ -269,69 +239,35 @@ def attach_envelope(
 
 
 # ═══════════════════════════════════════════════════════════════
-# 2. Shared-Memory (/dev/shm) Session Pool & State Cache
+# 2. Pure In-Memory Session Cache
 # ═══════════════════════════════════════════════════════════════
 
 
-def resolve_pool_base_dir() -> Path:
-    """Resolve the fastest available volatile directory for Penpot MCP session slots.
-
-    Gracefully tolerates read-only container/sandbox filesystems by keeping state in RAM.
-    """
-    env_dir = os.environ.get("PENPOT_MCP_POOL_DIR")
-    if env_dir:
-        p = Path(env_dir).resolve()
-        with contextlib.suppress(OSError):
-            p.mkdir(parents=True, exist_ok=True)
-        return p
-
-    for candidate_root in (
-        Path("/dev/shm"),
-        Path(os.environ["XDG_RUNTIME_DIR"]) if os.environ.get("XDG_RUNTIME_DIR") else None,
-        Path("/tmp"),
-    ):
-        if candidate_root and candidate_root.exists() and os.access(candidate_root, os.W_OK):
-            p = candidate_root / "penpot_mcp_pool"
-            with contextlib.suppress(OSError):
-                p.mkdir(parents=True, exist_ok=True)
-                return p
-
-    return Path("/dev/shm/penpot_mcp_pool")
-
-
 class SessionPool:
-    """Thread-safe warm slot leasing and RAM state cache for multi-step Penpot workflows."""
+    """Thread-safe pure in-memory session state cache for multi-step Penpot workflows."""
 
     def __init__(
         self,
         max_slots: int = DEFAULT_MAX_SLOTS,
         lease_ttl_sec: float = DEFAULT_LEASE_TTL_SEC,
-        base_dir: Path | str | None = None,
     ) -> None:
         self.max_slots = max(1, int(max_slots))
         self.lease_ttl_sec = float(lease_ttl_sec)
-        self.base_dir = Path(base_dir).resolve() if base_dir else resolve_pool_base_dir()
-        with contextlib.suppress(OSError):
-            self.base_dir.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
 
-        self._slots: dict[int, dict[str, Any]] = {}
-        for sid in range(self.max_slots):
-            scratch = self.base_dir / f"slot_{sid}"
-            with contextlib.suppress(OSError):
-                scratch.mkdir(parents=True, exist_ok=True)
-            self._slots[sid] = {
+        self._slots: dict[int, dict[str, Any]] = {
+            sid: {
                 "slot_id": sid,
                 "session_id": None,
                 "agent_id": None,
                 "leased_at": 0.0,
                 "expires_at": 0.0,
                 "reuse_count": 0,
-                "scratch_dir": str(scratch),
                 "state_cache": {},
                 "in_use": False,
             }
-
+            for sid in range(self.max_slots)
+        }
         self._session_map: dict[tuple[str, str], int] = {}
         self._shared_session_cache: dict[str, dict[str, Any]] = {}
 
@@ -349,9 +285,8 @@ class SessionPool:
                 slot["state_cache"][k_str] = value
                 slot["expires_at"] = time.time() + self.lease_ttl_sec
             else:
-                with contextlib.suppress(RuntimeError, OSError):
-                    slot = self.acquire(sid_str, aid_str)
-                    self._slots[slot["slot_id"]]["state_cache"][k_str] = value
+                slot = self.acquire(sid_str, aid_str)
+                self._slots[slot["slot_id"]]["state_cache"][k_str] = value
             return {
                 "status": "OK",
                 "session_id": sid_str,
@@ -463,7 +398,6 @@ class SessionPool:
             if clear_state:
                 slot["state_cache"].clear()
                 self._shared_session_cache.pop(sid_str, None)
-                self._clear_dir(Path(slot["scratch_dir"]))
                 self._session_map.pop(key, None)
                 slot["session_id"] = None
                 slot["agent_id"] = None
@@ -487,7 +421,6 @@ class SessionPool:
                 slot["agent_id"] = None
                 slot["reuse_count"] = 0
                 slot["state_cache"].clear()
-                self._clear_dir(Path(slot["scratch_dir"]))
                 if not any(s.get("session_id") == key[0] and s.get("slot_id") != sid for s in self._slots.values()):
                     self._shared_session_cache.pop(key[0], None)
                 reaped += 1
@@ -504,7 +437,6 @@ class SessionPool:
                 slot["agent_id"] = None
                 slot["reuse_count"] = 0
                 slot["state_cache"].clear()
-                self._clear_dir(Path(slot["scratch_dir"]))
             return {"status": "OK", "flushed_count": flushed}
 
     @staticmethod
@@ -514,21 +446,9 @@ class SessionPool:
             "session_id": slot["session_id"],
             "agent_id": slot["agent_id"],
             "reuse_count": slot["reuse_count"],
-            "scratch_dir": slot["scratch_dir"],
             "in_use": slot["in_use"],
             "cached_keys": list(slot["state_cache"].keys()),
         }
-
-    @staticmethod
-    def _clear_dir(p: Path) -> None:
-        if not p.is_dir():
-            return
-        for child in p.iterdir():
-            with contextlib.suppress(OSError):
-                if child.is_dir():
-                    shutil.rmtree(child, ignore_errors=True)
-                else:
-                    child.unlink(missing_ok=True)
 
 
 GLOBAL_SESSION_POOL = SessionPool()
@@ -721,7 +641,7 @@ def _set_dot_path(
 
 
 def project_fields(data: Any, select_fields: list[str] | None) -> Any:
-    """Server-side dot-path field projection reducing response payload size in RAM."""
+    """Server-side dot-path field projection reducing response payload size in memory."""
     if not select_fields or not isinstance(data, dict):
         return data
 
@@ -780,7 +700,7 @@ def project_fields(data: Any, select_fields: list[str] | None) -> Any:
 
 
 # ═══════════════════════════════════════════════════════════════
-# 5. Topos DAG Guard & Topological Step Ordering
+# 5. Step Dependency Graph (DAG) Validator & Topological Ordering
 # ═══════════════════════════════════════════════════════════════
 
 
@@ -791,7 +711,7 @@ class ToposVerdict:
 
 
 class ToposGuard:
-    """Ontological DAG validator preventing circular co-dependencies (A <-> B) in batch/playbooks."""
+    """DAG validator preventing circular step dependencies (A <-> B) in multi-step batches."""
 
     @staticmethod
     def audit_task_dag(
@@ -834,7 +754,7 @@ class ToposGuard:
                     ToposVerdict.BLOCKED,
                     [
                         f"Circular co-dependency detected: [{cycle_repr}].",
-                        "Topos axiom violated: co-dependent steps are blocked.",
+                        "Cyclic batch steps are blocked.",
                     ],
                 )
 

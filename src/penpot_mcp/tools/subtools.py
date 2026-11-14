@@ -1,11 +1,13 @@
-"""Compressed Polymorphic Sub-Tools & Code-Mode Batch Engine for Penpot MCP.
+"""Domain Branch Toolsets & Code-Mode Batch Optimization for Penpot MCP.
 
-Reverse-engineered (RE: compatible) from Agent Execution Plane (AEP):
-Compresses all 77 granular Penpot tools into 14 domain-grouped polymorphic MCP tools
-with `action` routing, `verbosity` ('summary' | 'detail' | 'brief' | 'terse'),
-`select_fields` server-side dot-path field projection, `/dev/shm` `SessionPool`
-caching (`session_id`, `store_as`), and `playbook_run(action='batch'|'code')`
-single-turn DAG execution with `$prev.*`, `$steps.<id>.*`, and `$cache.<key>.*` piping.
+Groups the 77 Penpot capabilities into 14 domain-level branch tools so AI clients
+can treat each domain tool as a primary toolset router (`action`), combined with
+pure in-memory MCP optimization primitives:
+  - `verbosity` ('summary' | 'detail' | 'brief' | 'terse')
+  - `select_fields` server-side dot-path field projection
+  - In-memory `SessionPool` state caching (`session_id`, `store_as`)
+  - `playbook_run(action='batch'|'code')` single-turn multi-step execution with
+    `$prev.*`, `$steps.<id>.*`, and `$cache.<key>.*` variable piping.
 """
 
 from __future__ import annotations
@@ -69,7 +71,7 @@ SUBTOOLS_CATALOG: dict[str, dict[str, Any]] = {
     "discover": {
         "domain": "Orientation, Capability Manifest & Schema Reflection",
         "actions": ["discover", "capabilities", "playbook", "schema"],
-        "description": "Zero-guessing orientation: routes natural-language use cases, returns capability readiness with /dev/shm caching, tactical UI playbooks, or tool schemas.",
+        "description": "Orientation router: maps natural-language use cases to domain toolsets, returns capability readiness with in-memory caching, workflow playbooks, or tool schemas.",
     },
     "projects": {
         "domain": "Projects & Teams",
@@ -206,6 +208,21 @@ def _invalid_action_response(
     tracker: RequestTelemetry,
     verbosity: str,
 ) -> str:
+    clean_act = (action or "").strip().lower()
+    if clean_act in ("help", "actions", "list_actions", "schema"):
+        meta = SUBTOOLS_CATALOG.get(tool_name, {})
+        return attach_envelope(
+            {
+                "status": "OK",
+                "tool": tool_name,
+                "domain": meta.get("domain", tool_name),
+                "description": meta.get("description", ""),
+                "available_actions": valid_actions,
+            },
+            tracker,
+            verbosity=verbosity,
+            summary=f"Toolset branch '{tool_name}' exposes {len(valid_actions)} actions.",
+        )
     return attach_envelope(
         {
             "status": "INVALID_ACTION",
@@ -255,7 +272,10 @@ async def discover(
     force_refresh: bool = False,
     select_fields: list[str] | None = None,
 ) -> str:
-    """Orientation, capability manifest, tactical playbooks, and schema reflection for Penpot MCP."""
+    """Orientation, capability manifest, workflow playbooks, and schema reflection for Penpot MCP.
+
+    Actions: 'discover' | 'capabilities' | 'playbook' | 'schema'.
+    """
     act = (action or "discover").strip().lower()
     tracker = RequestTelemetry("discover", act)
     eff_sid = (session_id or "global").strip()
@@ -441,7 +461,10 @@ async def projects(
     store_as: str | None = None,
     session_id: str | None = None,
 ) -> str:
-    """Polymorphic sub-tool for Teams, Projects, and cross-project file search."""
+    """Branch toolset for Teams, Projects, and cross-project file search.
+
+    Route via action: 'list_teams' | 'list_projects' | 'create_project' | 'list_files' | 'search_files' (or 'help').
+    """
     from penpot_mcp.tools import files as _files_mod
     from penpot_mcp.tools import projects as _proj_mod
 
@@ -496,7 +519,10 @@ async def files(
     store_as: str | None = None,
     session_id: str | None = None,
 ) -> str:
-    """Polymorphic sub-tool for File CRUD, pages, history, snapshots, and revision diffs."""
+    """Branch toolset for File CRUD, pages, history, snapshots, and revision diffs.
+
+    Route via action: 'summary' | 'pages' | 'history' | 'libraries' | 'create' | 'rename' | 'duplicate' | 'delete' | 'raw_data' | 'compare_revisions' | 'create_snapshot' | 'list_snapshots' (or 'help').
+    """
     from penpot_mcp.tools import advanced as _adv_mod
     from penpot_mcp.tools import files as _files_mod
 
@@ -596,7 +622,10 @@ async def shapes(
     store_as: str | None = None,
     session_id: str | None = None,
 ) -> str:
-    """Polymorphic sub-tool for reading page objects, shape trees, details, search, CSS, and SVG."""
+    """Branch toolset for reading page objects, shape trees, details, search, CSS, and SVG.
+
+    Route via action: 'list' | 'tree' | 'details' | 'search' | 'css' | 'svg' (or 'help').
+    """
     from penpot_mcp.gateway import gateway
     from penpot_mcp.tools import shapes as _shapes_mod
     from penpot_mcp.transformers.css import shape_to_css_string
@@ -606,6 +635,8 @@ async def shapes(
     tracker = RequestTelemetry("shapes", act)
     valid = ["list", "tree", "details", "search", "css", "svg"]
 
+    if act in ("help", "actions", "list_actions", "schema"):
+        return _invalid_action_response("shapes", act, valid, tracker, verbosity)
     if not file_id or not page_id:
         return _missing_param_response("shapes", act, ["file_id", "page_id"], tracker, verbosity)
 
@@ -692,7 +723,10 @@ async def create(
     store_as: str | None = None,
     session_id: str | None = None,
 ) -> str:
-    """Polymorphic sub-tool for creating shapes, frames, paths, groups, components, instances, and pages."""
+    """Branch toolset for creating shapes, frames, paths, groups, components, instances, and pages.
+
+    Route via action: 'rectangle' | 'frame' | 'ellipse' | 'text' | 'path' | 'group' | 'component' | 'component_instance' | 'page' (or 'help').
+    """
     from penpot_mcp.tools import create as _create_mod
 
     act = (action or "rectangle").strip().lower()
@@ -709,6 +743,8 @@ async def create(
         "page",
     ]
 
+    if act in ("help", "actions", "list_actions", "schema"):
+        return _invalid_action_response("create", act, valid, tracker, verbosity)
     if not file_id:
         return _missing_param_response("create", act, ["file_id"], tracker, verbosity)
 
@@ -883,7 +919,10 @@ async def modify(
     store_as: str | None = None,
     session_id: str | None = None,
 ) -> str:
-    """Polymorphic sub-tool for modifying shapes, geometry, fills, strokes, flex/grid layout, and pages."""
+    """Branch toolset for modifying shapes, geometry, fills, strokes, flex/grid layout, and pages.
+
+    Route via action: 'attrs' | 'move' | 'resize' | 'delete' | 'rename' | 'fill' | 'stroke' | 'opacity' | 'layout' | 'reorder' | 'delete_page' | 'rename_page' (or 'help').
+    """
     from penpot_mcp.tools import modify as _mod
 
     act = (action or "attrs").strip().lower()
@@ -903,6 +942,8 @@ async def modify(
         "rename_page",
     ]
 
+    if act in ("help", "actions", "list_actions", "schema"):
+        return _invalid_action_response("modify", act, valid, tracker, verbosity)
     if not file_id or not page_id:
         return _missing_param_response("modify", act, ["file_id", "page_id"], tracker, verbosity)
 
@@ -1008,13 +1049,18 @@ async def text(
     store_as: str | None = None,
     session_id: str | None = None,
 ) -> str:
-    """Polymorphic sub-tool for text content, font family, font size, alignment, and text styling."""
+    """Branch toolset for text content, font family, font size, alignment, and text styling.
+
+    Route via action: 'set_content' | 'set_font' | 'set_font_size' | 'set_align' | 'set_style' (or 'help').
+    """
     from penpot_mcp.tools import text as _text_mod
 
     act = (action or "set_content").strip().lower()
     tracker = RequestTelemetry("text", act)
     valid = ["set_content", "set_font", "set_font_size", "set_align", "set_style"]
 
+    if act in ("help", "actions", "list_actions", "schema"):
+        return _invalid_action_response("text", act, valid, tracker, verbosity)
     if not file_id or not page_id or not shape_id:
         return _missing_param_response("text", act, ["file_id", "page_id", "shape_id"], tracker, verbosity)
 
@@ -1096,7 +1142,10 @@ async def assets(
     store_as: str | None = None,
     session_id: str | None = None,
 ) -> str:
-    """Polymorphic sub-tool for Design System assets: components, colors, typographies, and token binding."""
+    """Branch toolset for Design System assets: components, colors, typographies, and token binding.
+
+    Route via action: 'components' | 'design_tokens' | 'list_colors' | 'create_color' | 'update_color' | 'delete_color' | 'list_typographies' | 'create_typography' | 'update_typography' | 'delete_typography' | 'apply_token' | 'auto_bind_tokens' (or 'help').
+    """
     from penpot_mcp.tools import colors as _colors_mod
     from penpot_mcp.tools import components as _comp_mod
     from penpot_mcp.tools import tokens as _tokens_mod
@@ -1119,6 +1168,8 @@ async def assets(
         "auto_bind_tokens",
     ]
 
+    if act in ("help", "actions", "list_actions", "schema"):
+        return _invalid_action_response("assets", act, valid, tracker, verbosity)
     if not file_id:
         return _missing_param_response("assets", act, ["file_id"], tracker, verbosity)
 
@@ -1233,7 +1284,10 @@ async def comments(
     store_as: str | None = None,
     session_id: str | None = None,
 ) -> str:
-    """Polymorphic sub-tool for comments, replies, thread resolution, live presence, and share links."""
+    """Branch toolset for comments, replies, thread resolution, live presence, and share links.
+
+    Route via action: 'list' | 'active_users' | 'share_links' | 'create' | 'reply' | 'resolve' (or 'help').
+    """
     from penpot_mcp.tools import comments as _comm_mod
 
     act = (action or "list").strip().lower()
@@ -1293,7 +1347,10 @@ async def media(
     store_as: str | None = None,
     session_id: str | None = None,
 ) -> str:
-    """Polymorphic sub-tool for file media assets, team custom fonts, and SSRF-guarded media upload."""
+    """Branch toolset for file media assets, team custom fonts, and SSRF-guarded media upload.
+
+    Route via action: 'list_assets' | 'list_fonts' | 'upload' (or 'help').
+    """
     from penpot_mcp.tools import media as _media_mod
 
     act = (action or "list_assets").strip().lower()
@@ -1339,13 +1396,18 @@ async def export(
     store_as: str | None = None,
     session_id: str | None = None,
 ) -> str:
-    """Polymorphic sub-tool for exporting frames/shapes to PNG or SVG."""
+    """Branch toolset for exporting frames/shapes to PNG or SVG.
+
+    Route via action: 'png' | 'svg' (or 'help').
+    """
     from penpot_mcp.tools import export as _exp_mod
 
     act = (action or "png").strip().lower()
     tracker = RequestTelemetry("export", act)
     valid = ["png", "svg"]
 
+    if act in ("help", "actions", "list_actions", "schema"):
+        return _invalid_action_response("export", act, valid, tracker, verbosity)
     if not file_id or not page_id or not object_id:
         return _missing_param_response("export", act, ["file_id", "page_id", "object_id"], tracker, verbosity)
 
@@ -1378,7 +1440,10 @@ async def system(
     store_as: str | None = None,
     session_id: str | None = None,
 ) -> str:
-    """Polymorphic sub-tool for read-only PostgreSQL SELECT queries, team webhooks, and user profile."""
+    """Branch toolset for read-only PostgreSQL SELECT queries, team webhooks, and user profile.
+
+    Route via action: 'query_db' | 'webhooks' | 'profile' (or 'help').
+    """
     from penpot_mcp.tools import database as _db_mod
 
     act = (action or "profile").strip().lower()
@@ -1419,7 +1484,10 @@ async def plugin(
     store_as: str | None = None,
     session_id: str | None = None,
 ) -> str:
-    """Polymorphic sub-tool for live browser plugin selection and script execution."""
+    """Branch toolset for live browser plugin selection and script execution.
+
+    Route via action: 'selection' | 'execute_script' (or 'help').
+    """
     from penpot_mcp.gateway import gateway
     from penpot_mcp.ws_controller import ws_controller
 
@@ -1691,11 +1759,10 @@ async def _execute_ordered_steps(
     else:
         base_res["results"] = results
 
-    base_res["ipc_slot"] = {
+    base_res["session_cache"] = {
         "slot_id": slot["slot_id"],
         "session_id": eff_sid,
         "reuse_count": slot["reuse_count"],
-        "scratch_dir": slot["scratch_dir"],
         "cached_keys": GLOBAL_SESSION_POOL.cache_get(
             session_id=eff_sid, agent_id=eff_agent
         ).get("keys", []),
@@ -1758,7 +1825,10 @@ async def playbook_run(
     agent_id: str = "default",
     verbosity: str = "summary",
 ) -> str:
-    """DAG Workflow Orchestration & Ephemeral Batch / Code Mode for Penpot MCP."""
+    """Multi-step Batch / Code Mode & Workflow Orchestration for Penpot MCP.
+
+    Route via action: 'batch' | 'code' | 'run' | 'create' | 'list' | 'dag_audit'.
+    """
     act = (action or "batch").strip().lower()
     tracker = RequestTelemetry("playbook_run", act)
     valid = ["batch", "code", "run", "create", "list", "dag_audit"]

@@ -620,8 +620,11 @@ async def test_discover_and_polymorphic_subtools_and_code_mode_batch(
     assert blocked_out["status"] == "BLOCKED"
     assert blocked_out["verdict"] == "BLOCKED"
 
-    # 6. Smoke-check remaining domain sub-tools param validation
-    for sub_fn in (shapes, create, modify, text, assets, comments, media, export, system, plugin):
+    # 6. Smoke-check all domain branch toolsets: self-describing action="help" & invalid action guard
+    for sub_fn in (projects, files, shapes, create, modify, text, assets, comments, media, export, system, plugin):
+        help_json = json.loads(await sub_fn(action="help"))
+        assert help_json["status"] == "OK"
+        assert len(help_json["available_actions"]) >= 2
         res_json = json.loads(await sub_fn(action="__invalid__"))
         assert res_json["status"] in ("INVALID_ACTION", "PARAM_ERROR")
 
