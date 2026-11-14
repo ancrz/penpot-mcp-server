@@ -6,6 +6,7 @@ from collections.abc import Callable
 from contextlib import asynccontextmanager
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -323,6 +324,18 @@ async def agent_upload_route(request):
             content_bytes=raw_bytes,
             content_type=content_type,
         )
+
+        # Persist raw attachment into shared /sandbox volume for ffmpeg-mcp if available
+        sandbox_root = Path(os.environ.get("SANDBOX_ROOT", "/sandbox"))
+        try:
+            uploads_dir = sandbox_root / "uploads"
+            uploads_dir.mkdir(parents=True, exist_ok=True)
+            safe_base = Path(att["filename"]).name.replace(" ", "_")
+            rel_sandbox = f"uploads/{att['id']}_{safe_base}"
+            (sandbox_root / rel_sandbox).write_bytes(raw_bytes)
+            att["sandbox_path"] = rel_sandbox
+        except OSError:
+            pass
 
         # Keep bounded cache (50 items) in gateway memory for chat context injection
         if len(agent_gateway.attachments_cache) >= 50:

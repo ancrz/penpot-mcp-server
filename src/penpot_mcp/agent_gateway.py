@@ -18,6 +18,7 @@ import asyncio
 from dataclasses import dataclass, field
 import json
 import logging
+import os
 import re
 import time
 from typing import Any, Optional
@@ -1124,6 +1125,39 @@ AGENT_FUNCTION_DECLARATIONS: list[dict[str, Any]] = [
                 },
             },
             "required": ["query"],
+        },
+    },
+    {
+        "name": "media_sandbox_ffmpeg",
+        "description": (
+            "Manipulate uploaded images or video attachments inside the isolated FFmpeg MCP sandbox "
+            "(/sandbox): inspect dimensions/metadata ('probe'), resize ('resize'), crop ('crop'), "
+            "convert/compress ('convert' to webp/png/jpg/avif), or extract a video frame ('extract_frame')."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {
+                    "type": "STRING",
+                    "description": "One of: probe, resize, crop, convert, extract_frame.",
+                },
+                "input_path": {
+                    "type": "STRING",
+                    "description": "Relative sandbox path of the uploaded file (e.g. 'uploads/<id>_logo.png').",
+                },
+                "output_name": {
+                    "type": "STRING",
+                    "description": "Output filename inside sandbox outputs/ (e.g. 'hero_opt.webp').",
+                },
+                "width": {"type": "INTEGER", "description": "Target width in pixels."},
+                "height": {"type": "INTEGER", "description": "Target height in pixels (-1 keeps aspect)."},
+                "x": {"type": "INTEGER", "description": "Crop X offset."},
+                "y": {"type": "INTEGER", "description": "Crop Y offset."},
+                "format": {"type": "STRING", "description": "Target format for convert (webp, png, jpg, avif)."},
+                "quality": {"type": "INTEGER", "description": "Compression quality 1-100 (default 85)."},
+                "timestamp": {"type": "STRING", "description": "Timestamp for extract_frame (e.g. '00:00:01')."},
+            },
+            "required": ["action", "input_path"],
         },
     },
 ]
@@ -2328,6 +2362,26 @@ class PenpotAgentGateway:
             )
             return vis
 
+        if fn_name == "media_sandbox_ffmpeg":
+            ffmpeg_url = os.environ.get("FFMPEG_MCP_URL", "http://penpot-ffmpeg-mcp:8890").rstrip("/")
+            action = str(fn_args.get("action") or "probe")
+            async with httpx.AsyncClient(timeout=35.0) as client:
+                resp = await client.post(
+                    f"{ffmpeg_url}/api/call",
+                    json={"action": action, "params": fn_args},
+                )
+            duration_ms = round((time.monotonic() - started) * 1000, 2)
+            res = resp.json() if resp.content else {"status": "ERROR", "error": f"HTTP {resp.status_code}"}
+            tool_trace.append(
+                {
+                    "tool": "ffmpeg_mcp",
+                    "action": action,
+                    "status": res.get("status", "OK" if resp.status_code < 400 else "ERROR"),
+                    "duration_ms": duration_ms,
+                }
+            )
+            return res
+
         return {"status": "ERROR", "error": f"Unknown agent function {fn_name!r}"}
 
     async def _run_deterministic_turn(
@@ -2538,7 +2592,8 @@ class PenpotAgentGateway:
         for aid in (attachment_ids or [])[:5]:
             att = self.attachments_cache.get(str(aid))
             if att and att.get("context_text"):
-                att_blocks.append(str(att["context_text"]))
+                sb = f"\n[sandbox_path: {att['sandbox_path']}]" if att.get("sandbox_path") else ""
+                att_blocks.append(f"{att['context_text']}{sb}")
         attachments_section = (
             "\n\n=== ATTACHED FILES & TEMPLATES CONTEXT ===\n"
             + "\n---\n".join(att_blocks)

@@ -1,0 +1,20 @@
+FROM python:3.14-alpine
+
+RUN apk add --no-cache ffmpeg && \
+    adduser -D -u 1000 appuser && \
+    mkdir -p /sandbox /app && \
+    chown -R appuser:appuser /sandbox /app
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir "mcp[cli]>=1.30.0,<2" "uvicorn>=0.54.0" "starlette>=0.46.0"
+
+COPY src/penpot_mcp/ffmpeg_mcp_server.py /app/ffmpeg_mcp_server.py
+
+USER appuser
+ENV SANDBOX_ROOT=/sandbox \
+    FFMPEG_MCP_HOST=0.0.0.0 \
+    FFMPEG_MCP_PORT=8890
+
+EXPOSE 8890
+CMD ["python", "/app/ffmpeg_mcp_server.py"]
