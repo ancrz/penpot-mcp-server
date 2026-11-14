@@ -21,7 +21,8 @@ MAX_ZIP_UNCOMPRESSED_BYTES = 24 * 1024 * 1024  # 24 MB
 MAX_CONTEXT_CHARS = 8000
 
 _IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp"})
-_TEXT_EXTS = frozenset({".svg", ".json", ".md", ".txt", ".css", ".html"})
+_TEXT_EXTS = frozenset({".svg", ".json", ".md", ".txt", ".css", ".html", ".csv", ".yaml", ".yml"})
+_OFFICE_EXTS = frozenset({".pdf", ".docx", ".xlsx"})
 
 
 def _safe_zip_member_name(name: str) -> bool:
@@ -179,6 +180,21 @@ def parse_uploaded_attachment(
             "context_text": f"--- {clean_name} ({kind}) ---\n{snippet}" + ("\n...[truncado]" if truncated else ""),
         }
 
+    if ext in _OFFICE_EXTS:
+        fmt_label = ext.lstrip(".").upper()
+        return {
+            "id": att_id,
+            "filename": clean_name,
+            "size_bytes": len(content_bytes),
+            "content_type": content_type or "application/octet-stream",
+            "kind": ext.lstrip("."),
+            "summary": f"Documento {fmt_label} {clean_name} ({round(len(content_bytes) / 1024, 1)} KB)",
+            "context_text": (
+                f"Documento {fmt_label} adjunto: {clean_name} ({len(content_bytes)} bytes). "
+                "Usa `design_suite_sandbox` (`doc_extract` o `pdf_render_pages`) con su `sandbox_path` para extraer texto/tablas o renderizar páginas."
+            ),
+        }
+
     raise ValueError(
-        f"Formato no soportado ({ext or 'sin extensión'}). Usa .penpot, .svg, .json, .md, .txt, .css o imagen."
+        f"Formato no soportado ({ext or 'sin extensión'}). Usa .penpot, .svg, .json, .md, .txt, .csv, .yaml, .pdf, .docx, .xlsx o imagen."
     )

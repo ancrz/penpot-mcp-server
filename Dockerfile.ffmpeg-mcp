@@ -9,6 +9,7 @@ WORKDIR /app
 
 RUN pip install --no-cache-dir "mcp[cli]>=1.30.0,<2" "uvicorn>=0.54.0" "starlette>=0.46.0"
 
+COPY src/penpot_mcp/code_mode.py /app/code_mode.py
 COPY src/penpot_mcp/ffmpeg_mcp_server.py /app/ffmpeg_mcp_server.py
 
 USER appuser

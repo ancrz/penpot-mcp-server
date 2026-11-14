@@ -1,9 +1,9 @@
-"""Sandboxed FFmpeg & Media Manipulation MCP Server.
+"""Sandboxed FFmpeg & Media Manipulation MCP Server (AEP Code Mode enabled).
 
 Runs in an isolated container (`penpot-ffmpeg-mcp`) sharing `/sandbox` with
-`penpot-mcp`. Exposes both FastMCP tools over Streamable HTTP (`/mcp`) and a
-lightweight internal JSON RPC endpoint (`/api/call`) for `agent_gateway.py`,
-with strict path-traversal containment and no-shell `create_subprocess_exec`.
+`penpot-mcp`. Exposes a single compressed AEP Code Mode tool (`ffmpeg_code_mode`)
+over Streamable HTTP (`/mcp`) and `/api/call` to minimize token usage and
+support multi-step `$steps.<id>.output_path` media pipelines in 1 turn.
 """
 
 from __future__ import annotations
@@ -20,6 +20,11 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 import uvicorn
+
+try:
+    from penpot_mcp.code_mode import compact_payload, execute_code_pipeline
+except ImportError:  # Standalone container layout (/app/code_mode.py)
+    from code_mode import compact_payload, execute_code_pipeline  # type: ignore[import-not-found,no-redef]
 
 SANDBOX_ROOT = Path(os.environ.get("SANDBOX_ROOT", "/sandbox")).resolve()
 FFMPEG_TIMEOUT_SEC = float(os.environ.get("FFMPEG_TIMEOUT_SEC", "30"))
@@ -61,7 +66,6 @@ async def _run_exec(cmd: list[str]) -> tuple[int, str, str]:
     )
 
 
-@mcp.tool()
 async def probe_media(input_path: str) -> dict[str, Any]:
     """Inspect image/video dimensions, format, and streams via ffprobe."""
     src = resolve_sandbox_path(input_path)
@@ -97,7 +101,6 @@ async def probe_media(input_path: str) -> dict[str, Any]:
     }
 
 
-@mcp.tool()
 async def resize_image(
     input_path: str,
     output_name: str,
@@ -126,7 +129,6 @@ async def resize_image(
     }
 
 
-@mcp.tool()
 async def crop_image(
     input_path: str,
     output_name: str,
@@ -157,7 +159,6 @@ async def crop_image(
     }
 
 
-@mcp.tool()
 async def convert_image(
     input_path: str,
     output_name: str,
@@ -193,7 +194,6 @@ async def convert_image(
     }
 
 
-@mcp.tool()
 async def extract_video_frame(
     input_path: str,
     output_name: str = "frame.png",
@@ -218,7 +218,7 @@ async def extract_video_frame(
 
 
 async def dispatch_media_action(action: str, params: dict[str, Any]) -> dict[str, Any]:
-    """Dispatch a compressed media_sandbox_ffmpeg action to the MCP tool."""
+    """Dispatch a single FFmpeg action inside /sandbox."""
     act = (action or "").strip().lower()
     if act == "probe":
         return await probe_media(input_path=str(params.get("input_path") or ""))
@@ -254,16 +254,77 @@ async def dispatch_media_action(action: str, params: dict[str, Any]) -> dict[str
     raise ValueError(f"Acción FFmpeg no soportada: {action}")
 
 
+@mcp.tool()
+async def ffmpeg_code_mode(
+    mode: str = "call",
+    action: str = "probe",
+    params: dict[str, Any] | None = None,
+    steps: list[dict[str, Any]] | None = None,
+    vars: dict[str, Any] | None = None,
+    verbosity: str = "summary",
+    return_only: str = "summary",
+    select_fields: list[str] | None = None,
+) -> dict[str, Any]:
+    """AEP Code Mode entry point for sandboxed FFmpeg media manipulation.
+
+    Modes:
+    - 'discover': list supported actions and $steps.<id>.output_path piping syntax.
+    - 'call': run one action ('probe' | 'resize' | 'crop' | 'convert' | 'extract_frame').
+    - 'pipeline': execute multi-step media DAG in 1 turn with compact token output.
+    """
+    m = (mode or "call").strip().lower()
+    if m == "discover":
+        return {
+            "status": "OK",
+            "service": "penpot-ffmpeg-mcp",
+            "code_mode": True,
+            "actions": ["probe", "resize", "crop", "convert", "extract_frame"],
+            "piping": "$steps.<step_id>.output_path",
+            "verbosity_levels": ["minimal", "summary", "full"],
+        }
+    if m == "pipeline":
+        return await execute_code_pipeline(
+            steps or [],
+            dispatch_media_action,
+            vars_dict=vars,
+            return_only=return_only,
+            select_fields=select_fields,
+            verbosity=verbosity,
+        )
+    res = await dispatch_media_action(action, params or {})
+    return compact_payload(
+        res,
+        verbosity=verbosity,
+        return_only=return_only,
+        select_fields=select_fields,
+    )
+
+
 async def _health(_request: Request) -> JSONResponse:
-    return JSONResponse({"status": "ok", "service": "penpot-ffmpeg-mcp", "sandbox": str(SANDBOX_ROOT)})
+    return JSONResponse(
+        {
+            "status": "ok",
+            "service": "penpot-ffmpeg-mcp",
+            "code_mode": True,
+            "sandbox": str(SANDBOX_ROOT),
+        }
+    )
 
 
 async def _api_call(request: Request) -> JSONResponse:
     try:
         body = await request.json()
-        action = str(body.get("action") or "")
-        params = body.get("params") or {}
-        res = await dispatch_media_action(action, params)
+        mode = str(body.get("mode") or ("pipeline" if body.get("steps") else "call"))
+        res = await ffmpeg_code_mode(
+            mode=mode,
+            action=str(body.get("action") or "probe"),
+            params=body.get("params") or {},
+            steps=body.get("steps"),
+            vars=body.get("vars"),
+            verbosity=str(body.get("verbosity") or "summary"),
+            return_only=str(body.get("return_only") or "summary"),
+            select_fields=body.get("select_fields"),
+        )
         return JSONResponse(res)
     except Exception as exc:
         return JSONResponse({"status": "ERROR", "error": str(exc)}, status_code=400)

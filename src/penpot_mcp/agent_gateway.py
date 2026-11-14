@@ -1130,24 +1130,28 @@ AGENT_FUNCTION_DECLARATIONS: list[dict[str, Any]] = [
     {
         "name": "media_sandbox_ffmpeg",
         "description": (
-            "Manipulate uploaded images or video attachments inside the isolated FFmpeg MCP sandbox "
-            "(/sandbox): inspect dimensions/metadata ('probe'), resize ('resize'), crop ('crop'), "
-            "convert/compress ('convert' to webp/png/jpg/avif), or extract a video frame ('extract_frame')."
+            "AEP Code Mode FFmpeg MCP sandbox (/sandbox): run single actions ('probe', 'resize', "
+            "'crop', 'convert', 'extract_frame') or multi-step 'pipeline' DAGs with "
+            "$steps.<id>.output_path piping and compact token output."
         ),
         "parameters": {
             "type": "OBJECT",
             "properties": {
+                "mode": {
+                    "type": "STRING",
+                    "description": "Code Mode: 'call' (single), 'pipeline' (multi-step DAG), or 'discover'.",
+                },
                 "action": {
                     "type": "STRING",
-                    "description": "One of: probe, resize, crop, convert, extract_frame.",
+                    "description": "Action for mode='call': probe, resize, crop, convert, extract_frame.",
                 },
                 "input_path": {
                     "type": "STRING",
-                    "description": "Relative sandbox path of the uploaded file (e.g. 'uploads/<id>_logo.png').",
+                    "description": "Relative sandbox path (e.g. 'uploads/<id>_logo.png').",
                 },
                 "output_name": {
                     "type": "STRING",
-                    "description": "Output filename inside sandbox outputs/ (e.g. 'hero_opt.webp').",
+                    "description": "Output filename inside sandbox outputs/.",
                 },
                 "width": {"type": "INTEGER", "description": "Target width in pixels."},
                 "height": {"type": "INTEGER", "description": "Target height in pixels (-1 keeps aspect)."},
@@ -1155,9 +1159,55 @@ AGENT_FUNCTION_DECLARATIONS: list[dict[str, Any]] = [
                 "y": {"type": "INTEGER", "description": "Crop Y offset."},
                 "format": {"type": "STRING", "description": "Target format for convert (webp, png, jpg, avif)."},
                 "quality": {"type": "INTEGER", "description": "Compression quality 1-100 (default 85)."},
-                "timestamp": {"type": "STRING", "description": "Timestamp for extract_frame (e.g. '00:00:01')."},
+                "timestamp": {"type": "STRING", "description": "Timestamp for extract_frame."},
+                "steps": {
+                    "type": "ARRAY",
+                    "description": "Pipeline steps [{id, action, ...params}] when mode='pipeline'.",
+                    "items": {"type": "OBJECT"},
+                },
+                "verbosity": {
+                    "type": "STRING",
+                    "description": "Token budget mode: 'minimal', 'summary' (default), or 'full'.",
+                },
             },
-            "required": ["action", "input_path"],
+            "required": [],
+        },
+    },
+    {
+        "name": "design_suite_sandbox",
+        "description": (
+            "AEP Code Mode Design & Document Suite MCP (/sandbox): SVG optimization ('svg_optimize'), "
+            "raster-to-SVG tracing ('raster_to_svg'), color palette extraction ('extract_palette'), "
+            "WCAG contrast ('wcag_contrast'), background removal ('remove_background'), PDF/DOCX/XLSX/CSV "
+            "extraction ('doc_extract'), PDF-to-PNG ('pdf_render_pages'), and bounded dataset query "
+            "('data_sandbox_query'). Supports single 'call' or multi-step 'pipeline' with $steps.<id>.output_path."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "mode": {
+                    "type": "STRING",
+                    "description": "Code Mode: 'call' (single), 'pipeline' (multi-step DAG), or 'discover'.",
+                },
+                "action": {
+                    "type": "STRING",
+                    "description": "Suite action name.",
+                },
+                "params": {
+                    "type": "OBJECT",
+                    "description": "Action parameters (e.g. input_path, output_name, fg_hex, bg_hex, n_colors).",
+                },
+                "steps": {
+                    "type": "ARRAY",
+                    "description": "Pipeline steps [{id, action, ...params}] when mode='pipeline'.",
+                    "items": {"type": "OBJECT"},
+                },
+                "verbosity": {
+                    "type": "STRING",
+                    "description": "Token budget mode: 'minimal', 'summary' (default), or 'full'.",
+                },
+            },
+            "required": [],
         },
     },
 ]
@@ -2364,18 +2414,52 @@ class PenpotAgentGateway:
 
         if fn_name == "media_sandbox_ffmpeg":
             ffmpeg_url = os.environ.get("FFMPEG_MCP_URL", "http://penpot-ffmpeg-mcp:8890").rstrip("/")
+            mode = str(fn_args.get("mode") or ("pipeline" if fn_args.get("steps") else "call"))
             action = str(fn_args.get("action") or "probe")
             async with httpx.AsyncClient(timeout=35.0) as client:
                 resp = await client.post(
                     f"{ffmpeg_url}/api/call",
-                    json={"action": action, "params": fn_args},
+                    json={
+                        "mode": mode,
+                        "action": action,
+                        "params": fn_args.get("params") or fn_args,
+                        "steps": fn_args.get("steps"),
+                        "verbosity": fn_args.get("verbosity") or "summary",
+                    },
                 )
             duration_ms = round((time.monotonic() - started) * 1000, 2)
             res = resp.json() if resp.content else {"status": "ERROR", "error": f"HTTP {resp.status_code}"}
             tool_trace.append(
                 {
                     "tool": "ffmpeg_mcp",
-                    "action": action,
+                    "action": f"{mode}:{action}" if mode != "pipeline" else "pipeline",
+                    "status": res.get("status", "OK" if resp.status_code < 400 else "ERROR"),
+                    "duration_ms": duration_ms,
+                }
+            )
+            return res
+
+        if fn_name == "design_suite_sandbox":
+            suite_url = os.environ.get("SUITE_MCP_URL", "http://penpot-suite-mcp:8891").rstrip("/")
+            mode = str(fn_args.get("mode") or ("pipeline" if fn_args.get("steps") else "call"))
+            action = str(fn_args.get("action") or "extract_palette")
+            async with httpx.AsyncClient(timeout=35.0) as client:
+                resp = await client.post(
+                    f"{suite_url}/api/call",
+                    json={
+                        "mode": mode,
+                        "action": action,
+                        "params": fn_args.get("params") or fn_args,
+                        "steps": fn_args.get("steps"),
+                        "verbosity": fn_args.get("verbosity") or "summary",
+                    },
+                )
+            duration_ms = round((time.monotonic() - started) * 1000, 2)
+            res = resp.json() if resp.content else {"status": "ERROR", "error": f"HTTP {resp.status_code}"}
+            tool_trace.append(
+                {
+                    "tool": "suite_mcp",
+                    "action": f"{mode}:{action}" if mode != "pipeline" else "pipeline",
                     "status": res.get("status", "OK" if resp.status_code < 400 else "ERROR"),
                     "duration_ms": duration_ms,
                 }

@@ -575,7 +575,7 @@ export default function App() {
               type="file"
               className="visually-hidden"
               multiple
-              accept=".penpot,.svg,.json,.md,.txt,.css,.html,.png,.jpg,.jpeg,.webp"
+              accept=".penpot,.svg,.json,.md,.txt,.css,.html,.csv,.yaml,.yml,.pdf,.docx,.xlsx,.png,.jpg,.jpeg,.webp"
               onChange={handleFileChange}
             />
             <div className="composer-input-wrap">

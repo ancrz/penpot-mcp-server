@@ -1,0 +1,28 @@
+FROM python:3.14-alpine
+
+RUN apk add --no-cache poppler-utils && \
+    adduser -D -u 1000 appuser && \
+    mkdir -p /sandbox /app && \
+    chown -R appuser:appuser /sandbox /app
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir \
+    "mcp[cli]>=1.30.0,<2" \
+    "uvicorn>=0.54.0" \
+    "starlette>=0.46.0" \
+    "pillow>=11.0.0" \
+    "pypdf>=5.0.0" \
+    "openpyxl>=3.1.5" \
+    "python-docx>=1.1.2"
+
+COPY src/penpot_mcp/code_mode.py /app/code_mode.py
+COPY src/penpot_mcp/suite_mcp_server.py /app/suite_mcp_server.py
+
+USER appuser
+ENV SANDBOX_ROOT=/sandbox \
+    SUITE_MCP_HOST=0.0.0.0 \
+    SUITE_MCP_PORT=8891
+
+EXPOSE 8891
+CMD ["python", "/app/suite_mcp_server.py"]
