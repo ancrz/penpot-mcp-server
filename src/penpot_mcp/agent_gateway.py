@@ -2211,20 +2211,20 @@ class PenpotAgentGateway:
                 action="code",
                 name=batch_name,
                 steps=steps,
-                return_only="all",
+                return_only="summary",
                 verbosity="summary",
             )
             res = json.loads(raw_str)
             duration_ms = round((time.monotonic() - started) * 1000, 2)
-            for step_item in res.get("results", []):
+            for step_item in res.get("steps_summary") or res.get("results") or []:
                 out = step_item.get("output") or {}
-                sid = out.get("shape_id") or out.get("id")
+                sid = step_item.get("shape_id") or out.get("shape_id") or out.get("id")
                 if sid and step_item.get("ok"):
                     created_shapes.append(
                         {
                             "shape_id": sid,
                             "step_id": step_item.get("id"),
-                            "name": (out.get("name") or step_item.get("id")),
+                            "name": (step_item.get("name") or out.get("name") or step_item.get("id")),
                         }
                     )
             tool_trace.append(
@@ -2246,20 +2246,20 @@ class PenpotAgentGateway:
                 name=batch_name,
                 steps=steps,
                 vars={"file_id": file_id, "page_id": page_id},
-                return_only="all",
+                return_only="summary",
                 verbosity="summary",
             )
             res = json.loads(raw_str)
             duration_ms = round((time.monotonic() - started) * 1000, 2)
-            for step_item in res.get("results", []):
+            for step_item in res.get("steps_summary") or res.get("results") or []:
                 out = step_item.get("output") or {}
-                sid = out.get("shape_id") or out.get("id")
+                sid = step_item.get("shape_id") or out.get("shape_id") or out.get("id")
                 if sid and step_item.get("ok"):
                     created_shapes.append(
                         {
                             "shape_id": sid,
                             "step_id": step_item.get("id"),
-                            "name": (out.get("name") or step_item.get("id")),
+                            "name": (step_item.get("name") or out.get("name") or step_item.get("id")),
                         }
                     )
             tool_trace.append(
@@ -2278,6 +2278,7 @@ class PenpotAgentGateway:
             action_name = str(fn_args.get("action") or "capabilities").strip().lower()
             params = dict(fn_args.get("params") or {})
             params["action"] = action_name
+            params.setdefault("verbosity", "summary")
             if file_id and "file_id" not in params:
                 params["file_id"] = file_id
             if page_id and "page_id" not in params:
@@ -2560,7 +2561,10 @@ class PenpotAgentGateway:
         for item in (history or [])[-6:]:
             if isinstance(item, dict) and item.get("text"):
                 role = "model" if item.get("role") in ("assistant", "model") else "user"
-                contents.append({"role": role, "parts": [{"text": str(item["text"])}]})
+                txt = str(item["text"])
+                if len(txt) > 1200:
+                    txt = txt[:1180] + "... [compacted]"
+                contents.append({"role": role, "parts": [{"text": txt}]})
         contents.append({"role": "user", "parts": [{"text": prompt}]})
 
         fallback_reasons: list[str] = []

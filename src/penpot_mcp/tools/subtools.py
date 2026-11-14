@@ -1831,7 +1831,17 @@ async def _execute_ordered_steps(
         base_res["output"] = prev_output
     elif ret_mode == "summary":
         base_res["steps_summary"] = [
-            {"id": r["id"], "tool": r["tool"], "status": r["status"], "ok": r["ok"]}
+            {
+                "id": r["id"],
+                "tool": r["tool"],
+                "status": r["status"],
+                "ok": r["ok"],
+                **(
+                    {"shape_id": r["output"]["shape_id"], "name": r["output"].get("name")}
+                    if isinstance(r.get("output"), dict) and r["output"].get("shape_id")
+                    else {}
+                ),
+            }
             for r in results
         ]
     else:
