@@ -1,0 +1,17 @@
+# Reproducible Dockerized PostgreSQL + pgvector Auto-Migrator (Init-Container)
+# Bundles both PostgreSQL 15 (+ pgvector) and PostgreSQL 17 (+ pgvector)
+# so major upgrades run safely without docker.sock or host dependencies.
+
+ARG PG_OLD_IMAGE=pgvector/pgvector:pg15
+ARG PG_TARGET_IMAGE=pgvector/pgvector:pg17
+
+FROM ${PG_OLD_IMAGE} AS pg_old
+FROM ${PG_TARGET_IMAGE}
+
+COPY --from=pg_old /usr/lib/postgresql/15 /usr/lib/postgresql/15
+COPY --from=pg_old /usr/share/postgresql/15 /usr/share/postgresql/15
+
+COPY scripts/pg_migrator.sh /usr/local/bin/pg_migrator.sh
+RUN chmod +x /usr/local/bin/pg_migrator.sh
+
+ENTRYPOINT ["/usr/local/bin/pg_migrator.sh"]

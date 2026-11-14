@@ -1938,6 +1938,8 @@ class PenpotAgentGateway:
 
     def get_status(self) -> dict[str, Any]:
         """Return safe, non-secret status of the AI Gateway, Plugin WS, and Circuit Breakers."""
+        from penpot_mcp.services.db import db
+
         routes = self.build_route_chain()
         live_ctx = gateway.active_context
         return {
@@ -1963,6 +1965,7 @@ class PenpotAgentGateway:
                 c.get("provider") == "anthropic" and c.get("has_key") for c in self.list_catalog()
             ),
             "credentials_count": len(self.credentials),
+            "valkey_cache": db.cache.stats(),
             "routes": [
                 {
                     "tier": r.tier,

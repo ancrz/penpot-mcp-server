@@ -1,6 +1,6 @@
 ARG PYTHON_IMAGE_TAG=3.13-alpine
 ARG UV_VERSION=0.12.10
-ARG PENPOT_MCP_VERSION=0.5.0
+ARG PENPOT_MCP_VERSION=0.6.0
 
 FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv_bin
 FROM python:${PYTHON_IMAGE_TAG} AS builder
@@ -19,7 +19,7 @@ RUN uv sync --locked --no-dev --no-editable
 
 FROM python:${PYTHON_IMAGE_TAG} AS runtime
 
-ARG PENPOT_MCP_VERSION=0.5.0
+ARG PENPOT_MCP_VERSION=0.6.0
 LABEL org.opencontainers.image.version="${PENPOT_MCP_VERSION}"
 ENV PENPOT_MCP_VERSION="${PENPOT_MCP_VERSION}" PATH="/app/.venv/bin:$PATH"
 

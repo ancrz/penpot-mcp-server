@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     penpot_db_pass: str = ""
     db_statement_timeout_ms: int = 30000
 
+    # Valkey 8.1 read-through cache (DB 1; Penpot uses DB 0)
+    valkey_url: str = ""
+    valkey_cache_ttl: int = 120
+
     # MCP Server & DNS-rebinding / Host header protection
     mcp_host: str = "0.0.0.0"
     mcp_port: int = 8787

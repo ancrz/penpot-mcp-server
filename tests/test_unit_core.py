@@ -90,7 +90,9 @@ def test_settings_properties_and_backward_compatible_defaults() -> None:
     assert cfg.has_credentials is False
     # Backward-compatible default is 'penpot' so existing .env files without PENPOT_DB_USER work
     assert cfg.penpot_db_user == "penpot"
-    assert cfg.penpot_mcp_version == "0.4.0"
+    from penpot_mcp import __version__
+
+    assert cfg.penpot_mcp_version == __version__
     assert cfg.mcp_tool_mode == "compressed"
     assert cfg.ssrf_allow_private_media is False
     assert cfg.db_statement_timeout_ms == 30000
@@ -1062,5 +1064,85 @@ async def test_multiuser_penpot_profiles_and_pgvector_vision(
     v_data = json.loads(v_resp.body.decode("utf-8"))
     assert v_data["enabled"] is True
     assert v_data["total_shapes"] == 3
+
+
+@pytest.mark.asyncio
+async def test_valkey_cache_and_pg_migrator_configs(tmp_path):
+    import pathlib
+    import subprocess
+    from penpot_mcp.services.cache import ValkeyCache, namespace_epoch_key
+
+    # 1. Validate Valkey & PostgreSQL configuration files (edilio-vivas baseline)
+    root = pathlib.Path(__file__).resolve().parents[1]
+    valkey_conf = (root / "config" / "valkey" / "valkey.conf").read_text(encoding="utf-8")
+    assert "maxmemory-policy volatile-lfu" in valkey_conf
+    assert 'save ""' in valkey_conf
+    assert "appendonly no" in valkey_conf
+    assert "lazyfree-lazy-eviction yes" in valkey_conf
+
+    pg_conf = (root / "config" / "postgresql" / "postgresql.conf").read_text(encoding="utf-8")
+    assert "shared_buffers = 512MB" in pg_conf
+    assert "random_page_cost = 1.1" in pg_conf
+    assert "effective_io_concurrency = 200" in pg_conf
+
+    # 2. ValkeyCache fail-open & epoch-namespaced key contract
+    assert namespace_epoch_key("vision") == "cache:namespace:vision:epoch"
+    cache = ValkeyCache(url="")
+    assert cache.enabled is False
+    assert await cache.get_json("vision", "k1") is None
+    assert await cache.set_json("vision", "k1", {"ok": True}) is False
+    assert await cache.bump_namespace("vision") == 0
+
+    class FakeRedis:
+        def __init__(self):
+            self.store = {}
+
+        async def get(self, k):
+            return self.store.get(k)
+
+        async def set(self, k, v, ex=None):
+            self.store[k] = v
+
+        async def incr(self, k):
+            val = int(self.store.get(k, 0)) + 1
+            self.store[k] = str(val)
+            return val
+
+    cache2 = ValkeyCache(url="redis://127.0.0.1:6379/1", default_ttl=60)
+    cache2._client = FakeRedis()  # type: ignore[assignment]
+    await cache2.set_json("vision", "shape_q", {"hits": 3})
+    assert await cache2.get_json("vision", "shape_q") == {"hits": 3}
+    assert cache2.hits == 1
+    await cache2.bump_namespace("vision")
+    assert await cache2.get_json("vision", "shape_q") is None
+    assert cache2.misses == 1
+
+    # 3. Abstract dry-run of pg_migrator.sh on fresh & PG15->PG17 simulated PGDATA
+    migrator = root / "scripts" / "pg_migrator.sh"
+    fresh_dir = tmp_path / "fresh"
+    fresh_dir.mkdir()
+    res_fresh = subprocess.run(
+        ["bash", str(migrator), "--dry-run"],
+        env={"PATH": "/usr/bin:/bin", "PGDATA": str(fresh_dir), "POSTGRES_TARGET_MAJOR": "17"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert res_fresh.returncode == 0
+    assert "Fresh PGDATA" in res_fresh.stdout
+
+    pg15_dir = tmp_path / "pg15"
+    pg15_dir.mkdir()
+    (pg15_dir / "PG_VERSION").write_text("15\n", encoding="utf-8")
+    res_dry = subprocess.run(
+        ["bash", str(migrator), "--dry-run"],
+        env={"PATH": "/usr/bin:/bin", "PGDATA": str(pg15_dir), "POSTGRES_TARGET_MAJOR": "17"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert res_dry.returncode in (0, 1)
+    assert "Detected PGDATA version=15, target=17, dry_run=true" in res_dry.stdout
+
 
 

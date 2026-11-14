@@ -24,13 +24,31 @@
 # ═══════════════════════════════════════════════════════════
 
 services:
+  penpot-pg-migrator:
+    build:
+      context: ./penpot-mcp-server
+      dockerfile: Dockerfile.pg-migrator
+      args:
+        PG_OLD_IMAGE: "pgvector/pgvector:pg15"
+        PG_TARGET_IMAGE: "${POSTGRES_IMAGE:-pgvector/pgvector:pg17}"
+    container_name: penpot-pg-migrator
+    restart: "no"
+    volumes:
+      - penpot_postgres_v15:/var/lib/postgresql/data
+      - penpot_pg_backups:/backups
+    environment:
+      POSTGRES_TARGET_MAJOR: "${POSTGRES_TARGET_MAJOR:-17}"
+      POSTGRES_DB: "${PENPOT_DB_NAME:-penpot}"
+      POSTGRES_USER: "${PENPOT_DB_USER:-penpot}"
+      POSTGRES_PASSWORD: "${PENPOT_DB_PASS:-penpot}"
+
   penpot-mcp:
-    image: "penpot-mcp:${PENPOT_MCP_VERSION:-0.5.0}"
+    image: "penpot-mcp:${PENPOT_MCP_VERSION:-0.6.0}"
     build:
       context: ./penpot-mcp-server
       dockerfile: Dockerfile
       args:
-        PENPOT_MCP_VERSION: "${PENPOT_MCP_VERSION:-0.5.0}"
+        PENPOT_MCP_VERSION: "${PENPOT_MCP_VERSION:-0.6.0}"
         PYTHON_IMAGE_TAG: "${PYTHON_IMAGE_TAG:-3.13-alpine}"
         UV_VERSION: "${UV_VERSION:-0.12.10}"
     container_name: penpot-mcp
@@ -41,14 +59,18 @@ services:
     depends_on:
       penpot-postgres:
         condition: service_healthy
+      penpot-valkey:
+        condition: service_healthy
       penpot-backend:
         condition: service_started
     networks:
       - penpot
     environment:
-      PENPOT_MCP_VERSION: "${PENPOT_MCP_VERSION:-0.5.0}"
+      PENPOT_MCP_VERSION: "${PENPOT_MCP_VERSION:-0.6.0}"
       MCP_PROTOCOL_VERSION: "${MCP_PROTOCOL_VERSION:-2025-03-26}"
       MCP_TOOL_MODE: "${MCP_TOOL_MODE:-compressed}"
+      VALKEY_URL: "${VALKEY_URL:-redis://penpot-valkey:6379/1}"
+      VALKEY_CACHE_TTL: "${VALKEY_CACHE_TTL:-120}"
       PENPOT_BASE_URL: "http://penpot-frontend:8080"
       PENPOT_PUBLIC_URL: "${PENPOT_PUBLIC_URI:-http://localhost:9001}"
       SSRF_ALLOW_PRIVATE_MEDIA: "${SSRF_ALLOW_PRIVATE_MEDIA:-false}"

@@ -9,6 +9,7 @@ from typing import Any
 import asyncpg
 
 from penpot_mcp.config import settings
+from penpot_mcp.services.cache import ValkeyCache
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +19,7 @@ class PenpotDB:
 
     def __init__(self) -> None:
         self._pool: asyncpg.Pool | None = None
+        self.cache = ValkeyCache(url=settings.valkey_url, default_ttl=settings.valkey_cache_ttl)
 
     async def connect(self) -> None:
         if settings.penpot_db_user == "penpot":
@@ -35,6 +37,7 @@ class PenpotDB:
             max_size=10,
         )
         await self.ensure_mcp_extensions_and_tables()
+        await self.cache.connect()
 
     async def ensure_mcp_extensions_and_tables(self) -> None:
         """Auto-initialize pgvector, pg_trgm, multi-user AI profile table, and canvas vision index."""
@@ -92,6 +95,7 @@ class PenpotDB:
             logger.debug("Optional MCP pgvector/multi-user table init notice: %s", exc)
 
     async def close(self) -> None:
+        await self.cache.close()
         if self._pool:
             await self._pool.close()
 
@@ -331,6 +335,10 @@ class PenpotDB:
         """List authenticated/active Penpot users from public.profile with session & presence status."""
         if not self._pool:
             return []
+        cache_suffix = f"users:{file_id or 'all'}"
+        cached = await self.cache.get_json("penpot_users", cache_suffix)
+        if isinstance(cached, list):
+            return cached
         rows = await self.fetch(
             """
             SELECT p.id::text AS id,
@@ -351,6 +359,7 @@ class PenpotDB:
             ORDER BY last_session_at DESC NULLS LAST, p.created_at ASC
             """
         )
+        await self.cache.set_json("penpot_users", cache_suffix, rows, ttl_seconds=60)
         return rows
 
     async def resolve_authenticated_penpot_user(
@@ -548,6 +557,7 @@ class PenpotDB:
                     fid,
                     pid,
                 )
+            await self.cache.bump_namespace("penpot_users")
             return True
         except Exception as exc:
             logger.debug("save_user_ai_state warning: %s", exc)
@@ -634,6 +644,7 @@ class PenpotDB:
                         str(r.get("semantic_summary") or ""),
                         str(r.get("embedding")),
                     )
+        await self.cache.bump_namespace("vision")
         return len(rows)
 
     async def search_page_vision_pgvector(
@@ -653,6 +664,10 @@ class PenpotDB:
         fid = _uuid.UUID(str(file_id).strip())
         pid = _uuid.UUID(str(page_id).strip())
         clean_q = (query_text or "").strip()
+        cache_suffix = f"q:{fid}:{pid}:{clean_q}:{max(1, int(top_k))}"
+        cached = await self.cache.get_json("vision", cache_suffix)
+        if isinstance(cached, list):
+            return cached
         rows = await self.fetch(
             """
             SELECT shape_id::text AS shape_id,
@@ -684,6 +699,7 @@ class PenpotDB:
             clean_q,
             max(1, int(top_k)),
         )
+        await self.cache.set_json("vision", cache_suffix, rows)
         return rows
 
 

@@ -7,9 +7,10 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python 3.13+](https://img.shields.io/badge/Python-3.13+-yellow.svg)](https://python.org)
 [![MCP Protocol](https://img.shields.io/badge/MCP-2025--03--26-green.svg)](https://modelcontextprotocol.io)
-[![Version: 0.5.0](https://img.shields.io/badge/Version-0.5.0-purple.svg)](pyproject.toml)
+[![Version: 0.6.0](https://img.shields.io/badge/Version-0.6.0-purple.svg)](pyproject.toml)
 [![Penpot 2.19.1](https://img.shields.io/badge/Penpot-2.19.1-teal.svg)](https://penpot.app)
-[![pgvector 0.8.7](https://img.shields.io/badge/pgvector-0.8.7-blueviolet.svg)](https://github.com/pgvector/pgvector)
+[![PostgreSQL 17 + pgvector 0.8.7](https://img.shields.io/badge/PostgreSQL_17-pgvector_0.8.7-blueviolet.svg)](https://github.com/pgvector/pgvector)
+[![Valkey 8.1](https://img.shields.io/badge/Valkey-8.1_Cache-red.svg)](https://valkey.io)
 [![Tools: 14 Sub--Tools / 81 Actions](https://img.shields.io/badge/Tools-14_Sub--Tools_(81_Actions)-orange.svg)](TOOLS.md)
 
 ---
@@ -33,17 +34,35 @@ Piensa en ello como el puente entre tu asistente de IA y tu herramienta de dise�
 
 ---
 
-## Hitos y Estado (v0.5.0)
+## Hitos y Estado (v0.6.0)
 
 ```mermaid
 flowchart LR
-    I["Intención: v0.5.0 Sesiones Multi-Usuario y Ojos pgvector"] --> M1["M1: planificado (Archon + Graphos G1) ✅"]
-    M1 --> M2["M2: auditado (Ontos) ✅"]
-    M2 --> M3["M3: implementado (Pragma) ✅"]
-    M3 --> M4["M4: verificado (Dokimos + Playwright) ✅"]
-    M4 --> M5["M5: documentado (Graphos G2) ✅"]
-    M5 --> M6["M6: comprometido y etiquetado v0.5.0 (Hermon) ✅"]
+    I["Intención: v0.6.0 Auto-Migrador PG17 + pgvector y Caché Valkey 8.1"] --> M1["M1: Configs y Auditoría DAG (Topos) ✅"]
+    M1 --> M2["M2: Migrador Dockerized PG15->PG17 ✅"]
+    M2 --> M3["M3: Caché Valkey 8.1 por Épocas ✅"]
+    M3 --> M4["M4: 48/48 Tests + Stack en Vivo ✅"]
+    M4 --> M5["M5: Docs y Lint Mermaid ✅"]
+    M5 --> M6["M6: Commit y Tag v0.6.0 ✅"]
 ```
+
+[⬆ Volver arriba](#servidor-mcp-de-penpot)
+
+---
+
+## Auto-Migrador PG17 + `pgvector` y Caché Valkey 8.1 Reproducible (v0.6.0)
+
+```mermaid
+flowchart LR
+    MIG["penpot-pg-migrator (Init-Container)\nPG15 + PG17 + pgvector"] -->|"1. Fresco / Igual / Dump+Backup+Restore"| PG["penpot-postgres\nPostgreSQL 17.12 + pgvector 0.8.7"]
+    VAL["penpot-valkey (Valkey 8.1)\nvolatile-lfu · DB0 Penpot · DB1 MCP"] -->|"service_healthy"| MCP["penpot-mcp (v0.6.0)"]
+    PG -->|"service_healthy"| MCP
+    MCP -->|"Read-Through + Invalidación O(1)"| VAL
+    MCP -->|"Fuente de Verdad + HNSW vector(64)"| PG
+```
+
+- **Auto-Migrador Dockerized (`Dockerfile.pg-migrator` + `scripts/pg_migrator.sh`)**: Se ejecuta antes de `penpot-postgres` (`condition: service_completed_successfully`). Detecta `PG_VERSION` automáticamente: en instalaciones frescas o misma versión no hace nada, y en saltos mayores (`15 → 17`) ejecuta `pg_dumpall` → backup atómico → `initdb --data-checksums` → `pg_restore` → `pgvector` + `pg_trgm` + `ANALYZE` (con rollback automático ante fallos).
+- **Caché Valkey 8.1 por Épocas (`src/penpot_mcp/services/cache.py` + `config/valkey/valkey.conf`)**: Usa `volatile-lfu` para proteger los contadores sin TTL `cache:namespace:*:epoch`, acelerando consultas repetidas de `PenpotDB` y visión `pgvector` en DB 1 sin interferir con DB 0 de Penpot, y degradando de forma segura (*fail-open*) a PostgreSQL si no está disponible.
 
 [⬆ Volver arriba](#servidor-mcp-de-penpot)
 
