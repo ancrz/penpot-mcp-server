@@ -1,24 +1,22 @@
-# Execution Report — Penpot MCP Server v0.4.0 (Full Pipeline)
+# Execution Report — Penpot MCP Server v0.5.0 (Full Pipeline)
 
-- **Pipeline File**: `docs/pipeline/feature_20261113_223500.md`
 - **Role**: Pragma (Stage 4)
-- **Date**: 2026-11-13
+- **Date**: 2026-11-14
 - **Status**: COMPLETED
 
 ## 1. Tasks Executed
 
 | Task ID | Summary | Files Modified / Created | Status |
-|---------|---------|--------------------------|--------|
-| `T1` | RE as SDD Blueprint & Sterile Isolation (`_re/figma_ai_penpot_sdd/blueprint.md` & `docs/06_re_sdd_ai_gateway_blueprint.md`) | `_re/figma_ai_penpot_sdd/blueprint.md`, `docs/06_re_sdd_ai_gateway_blueprint.md`, `.gitignore` | DONE |
-| `T2` | Sanitize & Polish `PenpotWSController` + Hybrid `PenpotGateway` + `plugin` sub-tool | `src/penpot_mcp/ws_controller.py`, `src/penpot_mcp/gateway.py`, `src/penpot_mcp/tools/subtools.py` | DONE |
-| `T3` | Integrate `sdk-agent-pipeline` & `vanguard-control` AI Gateway (`PenpotAgentGateway`) | `src/penpot_mcp/agent_gateway.py`, `src/penpot_mcp/config.py`, `src/penpot_mcp/server.py`, `src/penpot_mcp/__init__.py` | DONE |
-| `T4` | Build In-App Penpot AI Studio Mini-Frontend GUI (`ui.html` + `plugin.js` + `manifest.json`) | `src/penpot_mcp/plugin/ui.html`, `src/penpot_mcp/plugin/plugin.js`, `src/penpot_mcp/plugin/manifest.json` | DONE |
-| `T5` | Container Version Alignment (`v0.4.0`) & Live Stack Reload Runbook | `Dockerfile`, `.env.example`, `.env.local.example`, `docker-compose.penpot.yml`, `scripts/agent_reload_stack.sh` | DONE |
-| `T6` | Unit Test Suite Expansion (45 unit tests) & Static Analysis | `tests/test_unit_core.py` | DONE |
+|---|---|---|---|
+| `T1` | Upgrade `penpot-postgres` to `pgvector/pgvector:pg15` & auto-init `vector` + `pg_trgm` + multi-user/vision tables | `src/penpot_mcp/services/db.py`, `scripts/init_pgvector_and_users.sql`, `docker-compose.penpot.yml` | DONE |
+| `T2` | Implement 64D Semantic & Spatial Canvas Vision Engine (`vector(64)` HNSW + `pg_trgm` + `recommended_free_origin`) | `src/penpot_mcp/services/vision.py` | DONE |
+| `T3` | Partition `PenpotAgentGateway` profiles, API keys, and instructions per Penpot `profile_id` and inject Canvas Vision into LLM turns | `src/penpot_mcp/agent_gateway.py` | DONE |
+| `T4` | Expose `/agent/users`, `/agent/vision`, and `/plugin/embed.js` profile detection in Server | `src/penpot_mcp/server.py` | DONE |
+| `T5` | Add Tab `3. Usuarios & pgvector`, `👁️ Ojos pgvector` quick action, and header badges to Penpot AI Studio | `src/penpot_mcp/plugin/ui.html` | DONE |
+| `T6` | Bump `0.5.0` across manifests/Dockerfiles and add unit tests for vision & multi-user state | `Dockerfile`, `.env.example`, `.env.local.example`, `scripts/agent_reload_stack.sh`, `src/penpot_mcp/__init__.py`, `tests/test_unit_core.py` | DONE |
 
 ## 2. Static Analysis & Pre-Verification Checks
-- **AEP `sandbox_run` (`pytest`)**: `45 passed` in `0.49s`.
-- **AEP `sandbox_run` (`ruff check src tests`)**: `All checks passed!`.
-- **AEP `sandbox_run` (`mypy src tests/test_unit_core.py`)**: `Success: no issues found in 34 source files`.
-- **Semgrep (`semgrep scan --config auto --error src tests`)**: `0 findings (1536 rules run on 36 files)`.
-- **pip-audit (`uv run pip-audit`)**: `No known vulnerabilities found`.
+- **`uv run pytest -q`**: `47 passed, 15 deselected in 0.39s`.
+- **`uv run ruff check src/ tests/`**: `All checks passed!`.
+- **`uv run mypy src/penpot_mcp/`**: `Success: no issues found in 34 source files`.
+- **`uv run semgrep scan --config auto --error`**: `0 findings (1198 rules run)`.

@@ -1,21 +1,32 @@
 # Project Context: Penpot MCP Server
 
 ## 1. Premise & Core Intent
-`penpot-mcp-server` (`v0.4.0`) provides AI agents (Claude Code, Cursor, Gemini CLI, Antigravity) and in-app Penpot designers with full programmatic access to self-hosted [Penpot](https://penpot.app) instances via the Model Context Protocol (FastMCP `2025-03-26`), an AEP-inspired **14 Sub-Tool + Code Mode (`playbook_run`)** execution engine, and an embedded **SDK Agent Pipeline (`PenpotAgentGateway`)** with the **Penpot AI Studio** in-app mini-frontend.
+`penpot-mcp-server` (`v0.5.0`) provides AI agents (Claude Code, Cursor, Gemini CLI, Antigravity) and in-app Penpot designers with full programmatic access to self-hosted [Penpot](https://penpot.app) (`2.19.1`) via the Model Context Protocol (FastMCP `2025-03-26`), an AEP-inspired **14 Sub-Tool + Code Mode (`playbook_run`)** execution engine, an embedded **SDK Agent Pipeline (`PenpotAgentGateway`)**, **Multi-User Penpot Profile Isolation**, and a **PostgreSQL `pgvector` Semantic & Spatial Canvas Vision Eye**.
 
-## 2. Active Intent: v0.4.0 Hybrid Gateway, SDK Agent Pipeline & Penpot AI Studio GUI
-- **RE as SDD Integration**: Synthesized Figma AI ("Make Designs" contextual bar & live selection context), Official Penpot MCP (bidirectional WebSocket RPC & JS sandbox evaluation), `sdk-agent-pipeline` (multi-provider Gemini REST adapter, `thoughtSignature` backfill, circuit-breaker failover), and `vanguard-control` (`/agent/status`, `/agent/chat`, `/agent/breakers/reset`).
-- **Sanitized & Polished Tools**: Fixed `PenpotGateway.is_interactive` to dynamically track `ws_controller.is_connected`, added `asyncio.Future` request/response correlation (`execute_script`, `request_context`), and expanded the `plugin` sub-tool to 6 actions (`selection`, `context`, `status`, `execute_script`, `focus`, `agent_chat`).
-- **In-App Penpot AI Studio GUI (`ui.html` + `plugin.js`)**: Embedded mini-frontend inside Penpot providing live WS + HTTP telemetry, active model/selection badges, 1-click Quick Actions (`+ Hero Card`, `+ Login Form`, `+ Pricing Card`, `+ Navbar`, `Bind Tokens`, `Inspect CSS`), natural-language composer, tool execution trace viewer, and shape focus pills.
+## 2. Active Intent: v0.5.0 Multi-User Penpot Sessions & `pgvector` Canvas Vision Eye
+- **Multi-User Penpot Profile Isolation (`public.profile` + `public.http_session_v2` + `public.presence` -> `public.mcp_user_ai_profile`)**:
+  - Automatically detects the logged-in Penpot user via `/plugin/embed.js` (`/api/rpc/command/get-profile`) or session resolution, isolating each designer's `active_profile`, masked provider API keys (`…last4`), and `agent_instructions` in PostgreSQL without interrupting teammates working on the same project.
+- **PostgreSQL `pgvector` Canvas Vision Eye (`src/penpot_mcp/services/vision.py` -> `public.mcp_canvas_vision_index`)**:
+  - Runs on `pgvector/pgvector:pg15` (PostgreSQL `15` + `pgvector 0.8.7` + `pg_trgm 1.6`) with auto-initialization on `PenpotDB.connect()`.
+  - Encodes every shape on the active Penpot page into a normalized 64D vector (`vector(64)` HNSW cosine index + `pg_trgm`), computes `recommended_free_origin` for collision-free placement, and injects the semantic + spatial canvas map into every Gateway LLM turn.
+- **In-App Penpot AI Studio (`ui.html`)**:
+  - Added user badge (`👤 Anthony Cruz`), `👁️ pgvector` badge, `👁️ Ojos pgvector` quick action, and **Tab 3 (`3. Usuarios & pgvector`)** inside `⚙️ Config` for 1-click user switching and live semantic canvas scanning.
 
-## 3. Architecture & Key Decisions
-- **Quad-Layer Strategy**:
-  1. Direct PostgreSQL reads via `asyncpg` (`db.py`)
-  2. Validated Penpot Transit/JSON RPC writes via `httpx` (`api.py`)
-  3. Bidirectional Plugin WebSocket & HTTP Telemetry bridge (`ws_controller.py` + `gateway.py`)
-  4. Embedded Multi-Provider AI Gateway (`agent_gateway.py`) + In-App **Penpot AI Studio** (`plugin/ui.html`, `plugin/plugin.js`)
-- **Runtime & Security**: Python 3.13-alpine, Astral `uv` 0.12.10, non-root container (`0` CVEs in Docker Scout and `pip-audit`, `0` Semgrep findings).
+## 3. Dependency & Reinforcement Topology
+
+```mermaid
+flowchart TB
+    UI["Penpot AI Studio (ui.html + embed.js)"] -->|"GET/POST /agent/users, /agent/vision, /agent/chat"| SRV["FastMCP / Starlette Server (server.py)"]
+    SRV --> GW["PenpotAgentGateway (agent_gateway.py)"]
+    GW -->|"Sync & Query Canvas"| VIS["Canvas Vision Engine (services/vision.py)"]
+    GW -->|"User State & Vision SQL"| DB["PenpotDB (services/db.py)"]
+    VIS -->|"64D Vector + pg_trgm"| DB
+    DB -->|"asyncpg"| PG["PostgreSQL 15 + pgvector 0.8.7"]
+    GW -->|"Tools & Code Mode"| SUB["14 Sub-Tools / playbook_run (tools/subtools.py)"]
+    SUB -->|"RPC Writes"| API["Penpot API Client (services/api.py)"]
+    SUB -->|"WS Bridge"| WSC["WS Controller (ws_controller.py)"]
+```
 
 ## 4. Current State
-- **Implementation**: Completed by Pragma (`v0.4.0`).
-- **Verification**: Verified by Dokimos (45/45 unit tests, Ruff 0, Mypy 0 across 34 files, Semgrep 0, Docker Scout 0 CVEs, live Gemini `gemini-3.5-flash-lite` `/agent/chat` execution, and live Playwright verification of the Penpot AI Studio GUI and Penpot canvas).
+- **Release**: `v0.5.0` tagged and pushed on `dev` and `main`.
+- **Verification**: `47 passed` in `pytest`, `0` Ruff/Mypy issues across 34 source files, `0` Semgrep findings, `topos_audit_dag` **APPROVED** (`0` co-dependencies), live `penpot-mcp:0.5.0` running on `:8787` indexing `35` canvas shapes in `<50ms`, and Playwright E2E screenshots verified.

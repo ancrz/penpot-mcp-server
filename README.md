@@ -5,7 +5,9 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python 3.13+](https://img.shields.io/badge/Python-3.13+-yellow.svg)](https://python.org)
 [![MCP Protocol](https://img.shields.io/badge/MCP-2025--03--26-green.svg)](https://modelcontextprotocol.io)
-[![Version: 0.4.0](https://img.shields.io/badge/Version-0.4.0-purple.svg)](pyproject.toml)
+[![Version: 0.5.0](https://img.shields.io/badge/Version-0.5.0-purple.svg)](pyproject.toml)
+[![Penpot 2.19.1](https://img.shields.io/badge/Penpot-2.19.1-teal.svg)](https://penpot.app)
+[![pgvector 0.8.7](https://img.shields.io/badge/pgvector-0.8.7-blueviolet.svg)](https://github.com/pgvector/pgvector)
 [![Tools: 14 Sub--Tools / 81 Actions](https://img.shields.io/badge/Tools-14_Sub--Tools_(81_Actions)-orange.svg)](TOOLS.md)
 
 ---
@@ -29,21 +31,47 @@ Think of it as the bridge between your AI assistant and your design tool.
 
 ---
 
-## Milestones & Status (v0.4.0)
+## Milestones & Status (v0.5.0)
 
 ```mermaid
 flowchart LR
-    I["Intent: v0.4.0 Hybrid PenpotGateway, SDK Agent Pipeline & Penpot AI Studio GUI"] --> M1["M1: planned (Archon + Graphos G1) ✅"]
+    I["Intent: v0.5.0 Multi-User Sessions & pgvector Vision Eye"] --> M1["M1: planned (Archon + Graphos G1) ✅"]
     M1 --> M2["M2: audited (Ontos) ✅"]
     M2 --> M3["M3: implemented (Pragma) ✅"]
     M3 --> M4["M4: verified (Dokimos + Playwright) ✅"]
     M4 --> M5["M5: documented (Graphos G2) ✅"]
-    M5 --> M6["M6: committed (Hermon) ✅"]
+    M5 --> M6["M6: committed & tagged v0.5.0 (Hermon) ✅"]
 ```
+
+[⬆ Back to Top](#penpot-mcp-server)
 
 ---
 
-## In-App Penpot AI Studio & Embedded SDK Agent Pipeline (v0.4.0)
+## Multi-User Penpot Sessions & `pgvector` Canvas Vision Eye (v0.5.0)
+
+`penpot-mcp-server` (`v0.5.0`) connects Penpot's native authentication tables with PostgreSQL `pgvector` so every designer on a self-hosted **Penpot `2.19.1`** team has isolated AI credentials and every LLM in the Gateway has real-time spatial + semantic "eyes" over the canvas:
+
+```mermaid
+flowchart LR
+    USER["Penpot Designer (:9001)"] -->|"Browser Session Cookie (/api/rpc/command/get-profile)"| EMBED["embed.js + ui.html"]
+    EMBED -->|"GET /agent/users & POST /agent/chat"| GW["PenpotAgentGateway"]
+    GW -->|"Isolate Keys & Model (public.mcp_user_ai_profile)"| PG["PostgreSQL 15 + pgvector 0.8.7"]
+    GW -->|"Sync & Query Canvas (<50ms)"| VIS["vision.py (vector(64) HNSW + pg_trgm)"]
+    VIS -->|"recommended_free_origin + Top Shapes"| GW
+    PG -.->|"FK: public.profile / http_session_v2"| USER
+```
+
+- **Multi-User Profile Isolation (`public.profile` -> `public.mcp_user_ai_profile`)**: Automatically detects the logged-in Penpot user via `/plugin/embed.js` (or 1-click switching in **Tab `3. Usuarios & pgvector`**) and partitions each designer's active model (`Gemini`, `Claude`, `ChatGPT`, `DeepSeek`, `Ollama`), masked API keys (`…last4`), and custom instructions.
+- **`pgvector` Semantic & Spatial Canvas Vision Eye (`src/penpot_mcp/services/vision.py`)**: Auto-enables `vector` (`0.8.7`) and `pg_trgm` (`1.6`) on startup, encodes active page shapes into `vector(64)` HNSW embeddings (`public.mcp_canvas_vision_index`), computes collision-free `recommended_free_origin` coordinates, and injects the live canvas map into every LLM turn — plus the `👁️ Ojos pgvector` quick action and `query_canvas_vision_pgvector` tool.
+- **New Endpoints**:
+  - `GET | POST /agent/users` — List authenticated Penpot users (`public.profile`) and switch active isolated AI user sessions.
+  - `GET | POST /agent/vision` — Sync the active page into `public.mcp_canvas_vision_index` and run hybrid HNSW + `pg_trgm` spatial/semantic queries.
+
+[⬆ Back to Top](#penpot-mcp-server)
+
+---
+
+## In-App Penpot AI Studio & Embedded SDK Agent Pipeline (v0.4.0+)
 
 `penpot-mcp-server` (`v0.4.0`) embeds a modular **SDK Agent Pipeline (`PenpotAgentGateway`)** and an in-app **Penpot AI Studio** mini-frontend (`http://localhost:8787/plugin/ui.html` / `/plugin/manifest.json`):
 - **Multi-Provider AI Gateway (`src/penpot_mcp/agent_gateway.py`)**: Native Gemini REST adapter (`gemini-3.5-flash-lite`, `gemini-2.5-flash`) with `thoughtSignature` backfill, OpenAI/Ollama and Anthropic protocol translation, circuit-breaker failover (`primary -> backup -> local -> deterministic`), and 1-turn `playbook_run(action='code')` UI synthesis (`hero_card`, `login_form`, `pricing_card`, `navbar`).
@@ -62,13 +90,13 @@ flowchart LR
 graph TB
     AI["AI Agent\n(Claude Code · Cursor · Gemini CLI)"]
 
-    subgraph SERVERS["MCP Layer"]
-        MCP["penpot-mcp — Python (v0.3.0)\n14 compressed sub-tools (77 actions) · :8787\nDB reads + API writes + Plugin + Code Mode"]
+    subgraph SERVERS["MCP & AI Gateway Layer"]
+        MCP["penpot-mcp — Python (v0.5.0)\n14 sub-tools (77 actions) + AI Gateway · :8787\npgvector Vision + Multi-User Profiles + Code Mode"]
         OMCP["Official Penpot Plugin MCP\n(penpot/penpot monorepo)\nBrowser Plugin API only · TypeScript"]
     end
 
-    subgraph PENPOT["Penpot Stack (Docker)"]
-        PG["PostgreSQL\n:5432"]
+    subgraph PENPOT["Penpot 2.19.1 Stack (Docker)"]
+        PG["PostgreSQL 15 + pgvector 0.8.7\n:5432"]
         BE["Backend\n:6060"]
         FE["Frontend\n:9001"]
         EX["Exporter\n:6061"]
@@ -120,14 +148,19 @@ graph TB
 
 | Component | Technology | Purpose |
 |---|---|---|
-| Language | Python 3.13 | Runtime |
-| MCP SDK | [FastMCP](https://github.com/modelcontextprotocol/python-sdk) | Protocol handling, tool registration |
-| Database | [asyncpg](https://github.com/MagicStack/asyncpg) | Direct PostgreSQL access |
-| HTTP Client | [httpx](https://www.python-httpx.org/) | Penpot RPC API calls |
+| Language | Python 3.13 | Runtime (`3.13-alpine` hardened non-root container) |
+| MCP SDK | [FastMCP](https://github.com/modelcontextprotocol/python-sdk) | Protocol `2025-03-26`, Streamable HTTP & tool registration |
+| HTTP / Gateway | [Starlette](https://www.starlette.io/) + [Uvicorn](https://www.uvicorn.org/) | REST endpoints (`/agent/*`, `/plugin/*`) and same-origin WS |
+| Vector & DB | [PostgreSQL 15](https://www.postgresql.org/) + [`pgvector 0.8.7`](https://github.com/pgvector/pgvector) + `pg_trgm 1.6` | Penpot data (`public.profile`), isolated AI profiles, and `vector(64)` HNSW Canvas Vision |
+| DB Driver | [asyncpg](https://github.com/MagicStack/asyncpg) | High-speed async PostgreSQL & `pgvector` queries |
+| HTTP Client | [httpx](https://www.python-httpx.org/) | Penpot RPC API calls & multi-provider LLM Gateway adapters |
 | Validation | [Pydantic v2](https://docs.pydantic.dev/) | Automatic parameter validation |
-| Package Manager | [uv](https://github.com/astral-sh/uv) | Fast Python dependency management |
-| WebSocket | [websockets](https://websockets.readthedocs.io/) | Real-time browser plugin bridge |
-| Container | Docker | Deployment alongside Penpot |
+| Package Manager | [uv](https://github.com/astral-sh/uv) | Fast deterministic Python dependency management (`uv.lock`) |
+| WebSocket | [websockets](https://websockets.readthedocs.io/) | Real-time bidirectional browser plugin bridge (`:8787` / `:4402`) |
+| E2E & QA | [Playwright](https://playwright.dev/) · `pytest` · `ruff` · `mypy` · `semgrep` | Live browser UI/canvas verification & security gates |
+| Container | Docker (`penpotapp/*:2.19.1` + `pgvector/pgvector:pg15`) | Self-hosted Penpot + MCP deployment |
+
+[⬆ Back to Top](#penpot-mcp-server)
 
 ---
 
