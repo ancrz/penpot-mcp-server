@@ -42,6 +42,9 @@ Think of it as the bridge between your AI assistant and your design tool.
 - **Chat Context Attachments & `.penpot` Template Import (`src/penpot_mcp/services/attachments.py`)**: Supports `.penpot` archives (with Zip-slip/Zip-bomb guards and optional project import), `.svg`, `.json`, `.md`, `.txt`, `.csv`, `.yaml`, images, and Office/PDF files (`.pdf`, `.docx`, `.xlsx`).
 - **Unified Design & Media Suite (`design_suite_sandbox` + `ffmpeg` Code Mode)**: Exposes token-efficient Code Mode / sandboxed tools for Pillow, CairoSVG/SVGO, ImageMagick, Inkscape, Ghostscript, Poppler, Tesseract, `pypdf`/`python-docx`/`openpyxl`, and FFmpeg.
 - **Real-Time Canvas Visibility & Manual-Edit Probe**: Penpot's native `/ws/notifications` (Redis/Valkey Pub/Sub + `file.revn`) renders agent edits live without reloading, while `plugin.js` (`filechange` / `shapechange`) + `db.get_canvas_delta_since` detect manual user edits between turns, invalidate Valkey `vision`/`file` namespaces, and inject `MANUAL / CANVAS CHANGES SINCE LAST TURN` into the agent prompt.
+- **Schema-Driven Development (SDD) & Modular UI/Backend**: Shared Pydantic v2 contracts (`src/penpot_mcp/schemas/agent_sdd.py`) and React 19 + Zod schemas (`frontend/src/schemas.ts`, `frontend/src/types.ts`, `frontend/src/App.tsx`, `frontend/src/tabs/*`) eliminate hardcoded UI/API drift.
+- **Dual-DB Agentic Layer (`AgentStateStore`, `src/penpot_mcp/services/agent_store.py`)**: Configured via `AGENT_DB_URL`, decoupling agentic state (`mcp_chat_sessions`, `mcp_user_ai_profile`, `mcp_user_ai_secrets`) from Penpot's PostgreSQL (`penpot_postgres` default, or standalone `sqlite:///...` / secondary `postgres://...`) for independent maintenance.
+- **`sqlite-vec` (`v0.1.9`) Agent Semantic Memory**: In SQLite mode, `vec0` (`mcp_agent_memory_vec`, `float[64]`) + `mcp_agent_memory_meta` auto-index `chat_turn` (`POST /agent/chat`) and `artifact` (`register_artifact()`) records, expose `GET /agent/memory/search`, and inject cross-chat semantic recall into `AgentGateway.chat()` — complementing `penpot-postgres` (`pgvector` `mcp_canvas_vision_index`), which remains the source of truth for Penpot canvas shapes.
 
 [⬆ Back to Top](#penpot-mcp-server)
 
@@ -521,6 +524,9 @@ All settings are via environment variables. See [`.env.example`](.env.example) f
 | `WS_TOKEN` | — | Shared secret token required to authenticate WebSocket plugin connections |
 | `PLUGIN_WS_URL` | `ws://localhost:4402` | WebSocket URL the browser plugin uses to connect |
 | `PLUGIN_ORIGIN` | `http://localhost:8787` | Allowed browser `Origin` for the WebSocket handshake |
+| `SANDBOX_ROOT` | `/sandbox` | Root directory for per-chat agent sandboxes and downloaded artifacts |
+| `SANDBOX_EPHEMERAL_TTL_SEC` | `1800` | TTL in seconds for ephemeral chat sandboxes (persistent sandboxes do not expire) |
+| `AGENT_DB_URL` | — | Optional Dual-DB URL for `AgentStateStore` (`sqlite:///...` with `sqlite-vec`, or secondary `postgres://...`; empty = `penpot-postgres`) |
 
 ---
 
