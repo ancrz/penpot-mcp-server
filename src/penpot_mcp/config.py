@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     plugin_ws_url: str = "ws://localhost:4402"
     plugin_origin: str = "http://localhost:8787"
 
+    # API Key Vault Encryption (pgcrypto AES-256 + local AES-256-GCM)
+    penpot_mcp_encryption_key: str = ""
+
     # SDK Agent Pipeline & AI Gateway (RE from sdk-agent-pipeline & vanguard-control)
     penpot_agent_mode: str = "auto"
     penpot_agent_model: str = "gemini-3.5-flash-lite"

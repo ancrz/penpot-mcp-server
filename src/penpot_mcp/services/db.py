@@ -47,6 +47,7 @@ class PenpotDB:
             async with self.acquire() as conn:
                 await conn.execute("CREATE EXTENSION IF NOT EXISTS vector;")
                 await conn.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm;")
+                await conn.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
                 await conn.execute(
                     """
                     CREATE TABLE IF NOT EXISTS public.mcp_user_ai_profile (
@@ -59,6 +60,20 @@ class PenpotDB:
                         last_file_id UUID,
                         last_page_id UUID,
                         updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+                    );
+                    """
+                )
+                await conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS public.mcp_user_ai_secrets (
+                        profile_id UUID NOT NULL REFERENCES public.profile(id) ON DELETE CASCADE,
+                        credential_name TEXT NOT NULL,
+                        provider TEXT NOT NULL DEFAULT 'gemini',
+                        key_cipher BYTEA NOT NULL,
+                        key_last4 TEXT NOT NULL DEFAULT '',
+                        cipher_algo TEXT NOT NULL DEFAULT 'pgcrypto-aes256',
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+                        PRIMARY KEY (profile_id, credential_name)
                     );
                     """
                 )
@@ -503,6 +518,38 @@ class PenpotDB:
                         row[json_col] = _json.loads(val)
                     except Exception:
                         row[json_col] = {}
+
+            from penpot_mcp.services.crypto import (
+                get_pgcrypto_passphrase,
+                transform_credentials_keys,
+            )
+
+            creds = transform_credentials_keys(row.get("credentials") or {}, mode="decrypt")
+            passphrase = get_pgcrypto_passphrase()
+            secret_rows = await self.fetch(
+                """
+                SELECT credential_name,
+                       provider,
+                       pgp_sym_decrypt(key_cipher, $2) AS api_key
+                FROM public.mcp_user_ai_secrets
+                WHERE profile_id::text = $1
+                """,
+                profile_id.strip(),
+                passphrase,
+            )
+            for sr in secret_rows:
+                cname = str(sr.get("credential_name") or "")
+                if not cname:
+                    continue
+                if cname in creds and isinstance(creds[cname], dict):
+                    creds[cname]["api_key"] = str(sr.get("api_key") or "")
+                else:
+                    creds[cname] = {
+                        "name": cname,
+                        "provider": str(sr.get("provider") or "gemini"),
+                        "api_key": str(sr.get("api_key") or ""),
+                    }
+            row["credentials"] = creds
             return row
         except Exception as exc:
             logger.debug("get_user_ai_state warning: %s", exc)
@@ -520,16 +567,25 @@ class PenpotDB:
         last_file_id: str | None = None,
         last_page_id: str | None = None,
     ) -> bool:
-        """Persist per-user AI profile, credentials, and instructions into public.mcp_user_ai_profile."""
+        """Persist per-user AI profile and pgcrypto-encrypted API keys in PostgreSQL."""
         if not self._pool or not profile_id:
             return False
         import json as _json
         import uuid as _uuid
 
+        from penpot_mcp.services.crypto import (
+            decrypt_secret,
+            get_pgcrypto_passphrase,
+            transform_credentials_keys,
+        )
+
         try:
             uid = _uuid.UUID(str(profile_id).strip())
             fid = _uuid.UUID(str(last_file_id).strip()) if last_file_id else None
             pid = _uuid.UUID(str(last_page_id).strip()) if last_page_id else None
+            redacted_creds = transform_credentials_keys(credentials or {}, mode="redact")
+            passphrase = get_pgcrypto_passphrase()
+
             async with self.acquire() as conn:
                 await conn.execute(
                     """
@@ -552,11 +608,51 @@ class PenpotDB:
                     email or "",
                     fullname or "",
                     _json.dumps(active_profile or {}),
-                    _json.dumps(credentials or {}),
+                    _json.dumps(redacted_creds),
                     _json.dumps(agent_instructions or {}),
                     fid,
                     pid,
                 )
+
+                active_names: list[str] = []
+                for cname, cred in (credentials or {}).items():
+                    if not isinstance(cred, dict):
+                        continue
+                    plain_key = decrypt_secret(str(cred.get("api_key") or "")).strip()
+                    if not plain_key:
+                        continue
+                    active_names.append(str(cname))
+                    last4 = plain_key[-4:] if len(plain_key) >= 4 else "****"
+                    await conn.execute(
+                        """
+                        INSERT INTO public.mcp_user_ai_secrets (
+                            profile_id, credential_name, provider, key_cipher, key_last4, cipher_algo, updated_at
+                        )
+                        VALUES ($1, $2, $3, pgp_sym_encrypt($4, $5, 'cipher-algo=aes256'), $6, 'pgcrypto-aes256', clock_timestamp())
+                        ON CONFLICT (profile_id, credential_name) DO UPDATE SET
+                            provider = EXCLUDED.provider,
+                            key_cipher = EXCLUDED.key_cipher,
+                            key_last4 = EXCLUDED.key_last4,
+                            cipher_algo = EXCLUDED.cipher_algo,
+                            updated_at = clock_timestamp()
+                        """,
+                        uid,
+                        str(cname),
+                        str(cred.get("provider") or "gemini"),
+                        plain_key,
+                        passphrase,
+                        last4,
+                    )
+
+                if active_names:
+                    await conn.execute(
+                        """
+                        DELETE FROM public.mcp_user_ai_secrets
+                        WHERE profile_id = $1 AND NOT (credential_name = ANY($2::text[]))
+                        """,
+                        uid,
+                        active_names,
+                    )
             await self.cache.bump_namespace("penpot_users")
             return True
         except Exception as exc:

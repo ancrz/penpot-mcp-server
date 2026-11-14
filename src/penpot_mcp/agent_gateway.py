@@ -1372,15 +1372,17 @@ class PenpotAgentGateway:
             }
 
     def _load_persisted_state(self) -> None:
-        """Load runtime profile & credential overrides if persisted on disk."""
+        """Load runtime profile & credential overrides if persisted on disk (decrypting API keys)."""
         import os
+        from penpot_mcp.services.crypto import transform_credentials_keys
 
         if not os.path.exists(self._config_path):
             return
         try:
             with open(self._config_path, encoding="utf-8") as fh:
                 data = json.load(fh)
-            for name, cred in (data.get("credentials") or {}).items():
+            decrypted_creds = transform_credentials_keys(data.get("credentials") or {}, mode="decrypt")
+            for name, cred in decrypted_creds.items():
                 if isinstance(cred, dict) and cred.get("provider"):
                     self.credentials[name] = cred
             if isinstance(data.get("active_profile"), dict):
@@ -1390,14 +1392,20 @@ class PenpotAgentGateway:
             if isinstance(data.get("active_user"), dict):
                 self.active_user.update(data["active_user"])
             if isinstance(data.get("user_profiles_cache"), dict):
+                for uid_key, uentry in data["user_profiles_cache"].items():
+                    if isinstance(uentry, dict) and isinstance(uentry.get("credentials"), dict):
+                        uentry["credentials"] = transform_credentials_keys(
+                            uentry["credentials"], mode="decrypt"
+                        )
                 self.user_profiles_cache.update(data["user_profiles_cache"])
         except Exception as exc:
             logger.debug("Could not load persisted gateway config: %s", exc)
 
     def _save_persisted_state(self) -> None:
-        """Persist runtime profiles & credentials with 0600 permissions (including per-user cache)."""
+        """Persist runtime profiles & encrypted credentials with 0600 permissions."""
         import copy
         import os
+        from penpot_mcp.services.crypto import transform_credentials_keys
 
         uid = str(self.active_user.get("id") or "").strip()
         if uid:
@@ -1409,12 +1417,21 @@ class PenpotAgentGateway:
                 "agent_instructions": copy.deepcopy(self.agent_instructions),
             }
         try:
+            encrypted_cache: dict[str, dict[str, Any]] = {}
+            for uid_key, uentry in self.user_profiles_cache.items():
+                entry_copy = copy.deepcopy(uentry)
+                if isinstance(entry_copy.get("credentials"), dict):
+                    entry_copy["credentials"] = transform_credentials_keys(
+                        entry_copy["credentials"], mode="encrypt"
+                    )
+                encrypted_cache[uid_key] = entry_copy
+
             payload = {
-                "credentials": self.credentials,
+                "credentials": transform_credentials_keys(self.credentials, mode="encrypt"),
                 "active_profile": self.active_profile,
                 "agent_instructions": self.agent_instructions,
                 "active_user": self.active_user,
-                "user_profiles_cache": self.user_profiles_cache,
+                "user_profiles_cache": encrypted_cache,
             }
             with open(self._config_path, "w", encoding="utf-8") as fh:
                 json.dump(payload, fh, indent=2)
