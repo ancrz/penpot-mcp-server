@@ -13,7 +13,9 @@ DEFAULT_EPHEMERAL_TTL_SEC = int(os.environ.get("SANDBOX_EPHEMERAL_TTL_SEC", "180
 
 
 def get_sandbox_root() -> Path:
-    return Path(os.environ.get("SANDBOX_ROOT", "/sandbox")).resolve()
+    root = Path(os.environ.get("SANDBOX_ROOT", "/sandbox")).resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    return root
 
 
 def resolve_sandbox_download(rel_path: str) -> Path:
@@ -81,6 +83,11 @@ class SandboxSessionManager:
                     await client.set(key, payload)
                 else:
                     await client.setex(key, DEFAULT_EPHEMERAL_TTL_SEC, payload)
+            await db.sync_chat_sandbox_state(
+                session_id,
+                persistent=bool(state.get("persistent")),
+                artifacts=list(state.get("artifacts") or []),
+            )
         except Exception:
             pass
 

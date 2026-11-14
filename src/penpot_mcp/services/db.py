@@ -117,9 +117,16 @@ class PenpotDB:
                         messages JSONB NOT NULL DEFAULT '[]'::jsonb,
                         sandbox_persistent BOOLEAN NOT NULL DEFAULT FALSE,
                         last_revn INTEGER NOT NULL DEFAULT 0,
+                        artifacts JSONB NOT NULL DEFAULT '[]'::jsonb,
                         created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
                         updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
                     );
+                    """
+                )
+                await conn.execute(
+                    """
+                    ALTER TABLE public.mcp_chat_sessions
+                        ADD COLUMN IF NOT EXISTS artifacts JSONB NOT NULL DEFAULT '[]'::jsonb;
                     """
                 )
                 await conn.execute(
@@ -132,6 +139,14 @@ class PenpotDB:
                         FALSE
                     )
                     ON CONFLICT (session_id) DO NOTHING;
+                    """
+                )
+                await conn.execute(
+                    """
+                    INSERT INTO public.mcp_user_ai_profile (profile_id, email, fullname)
+                    SELECT id, COALESCE(email, ''), COALESCE(fullname, '')
+                    FROM public.profile
+                    ON CONFLICT (profile_id) DO NOTHING;
                     """
                 )
         except Exception as exc:
@@ -1102,6 +1117,31 @@ class PenpotDB:
                 session_id.strip(),
             )
         return True
+
+    async def sync_chat_sandbox_state(
+        self,
+        session_id: str,
+        *,
+        persistent: bool,
+        artifacts: list[dict[str, Any]],
+    ) -> None:
+        """Persist sandbox policy and artifact metadata alongside the chat session in PostgreSQL."""
+        if not self._pool or not session_id:
+            return
+        async with self.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO public.mcp_chat_sessions (session_id, sandbox_persistent, artifacts, updated_at)
+                VALUES ($1, $2, $3::jsonb, clock_timestamp())
+                ON CONFLICT (session_id) DO UPDATE SET
+                    sandbox_persistent = EXCLUDED.sandbox_persistent,
+                    artifacts = EXCLUDED.artifacts,
+                    updated_at = clock_timestamp();
+                """,
+                session_id.strip(),
+                bool(persistent),
+                json.dumps(artifacts[-50:]),
+            )
 
 
 # Singleton

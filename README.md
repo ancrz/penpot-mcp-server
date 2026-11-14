@@ -34,6 +34,19 @@ Think of it as the bridge between your AI assistant and your design tool.
 
 ---
 
+## Chat Workspace, Sandboxes, Canvas Delta & Seeding (v0.7.0+)
+
+- **Multi-Day Chat & Sandbox Persistence (`public.mcp_chat_sessions`)**: Conversations, `last_revn`, `sandbox_persistent` flag, and artifact metadata persist in PostgreSQL across days and browser reloads via `/agent/chats` and `/agent/chats/{session_id}` (with `+ Nuevo Chat` and session selector in the React 19 UI).
+- **Fresh-Start Database Seeding (`src/penpot_mcp/services/db.py` `ensure_schema`)**: Automatically creates `mcp_user_ai_profile`, `mcp_user_ai_secrets`, `mcp_canvas_vision_index` (HNSW), and `mcp_chat_sessions`, seeds the `'default'` (`Sesión principal`) chat session, and backfills `mcp_user_ai_profile` rows from `public.profile` idempotently (`ON CONFLICT DO NOTHING`).
+- **Ephemeral vs. Persistent Sandboxes & Artifact Downloads (`src/penpot_mcp/services/sandbox_sessions.py`)**: Per-chat sandbox policy in Valkey + PostgreSQL (`TTL=SANDBOX_EPHEMERAL_TTL_SEC` by default, or pinned without expiration for long sessions) backed by the `penpot_sandbox_data:/sandbox` Docker volume and `GET /agent/sandbox/download?path=...`.
+- **Chat Context Attachments & `.penpot` Template Import (`src/penpot_mcp/services/attachments.py`)**: Supports `.penpot` archives (with Zip-slip/Zip-bomb guards and optional project import), `.svg`, `.json`, `.md`, `.txt`, `.csv`, `.yaml`, images, and Office/PDF files (`.pdf`, `.docx`, `.xlsx`).
+- **Unified Design & Media Suite (`design_suite_sandbox` + `ffmpeg` Code Mode)**: Exposes token-efficient Code Mode / sandboxed tools for Pillow, CairoSVG/SVGO, ImageMagick, Inkscape, Ghostscript, Poppler, Tesseract, `pypdf`/`python-docx`/`openpyxl`, and FFmpeg.
+- **Real-Time Canvas Visibility & Manual-Edit Probe**: Penpot's native `/ws/notifications` (Redis/Valkey Pub/Sub + `file.revn`) renders agent edits live without reloading, while `plugin.js` (`filechange` / `shapechange`) + `db.get_canvas_delta_since` detect manual user edits between turns, invalidate Valkey `vision`/`file` namespaces, and inject `MANUAL / CANVAS CHANGES SINCE LAST TURN` into the agent prompt.
+
+[⬆ Back to Top](#penpot-mcp-server)
+
+---
+
 ## Milestones & Status (v0.6.0)
 
 ```mermaid

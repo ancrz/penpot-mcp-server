@@ -65,7 +65,11 @@ services:
         condition: service_started
     networks:
       - penpot
+    volumes:
+      - penpot_sandbox_data:/sandbox
     environment:
+      SANDBOX_ROOT: "${SANDBOX_ROOT:-/sandbox}"
+      SANDBOX_EPHEMERAL_TTL_SEC: "${SANDBOX_EPHEMERAL_TTL_SEC:-1800}"
       PENPOT_MCP_VERSION: "${PENPOT_MCP_VERSION:-0.6.0}"
       MCP_PROTOCOL_VERSION: "${MCP_PROTOCOL_VERSION:-2025-03-26}"
       MCP_TOOL_MODE: "${MCP_TOOL_MODE:-compressed}"
