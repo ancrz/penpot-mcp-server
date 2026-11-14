@@ -54,6 +54,13 @@ export const CreatedShapeSchema = z.object({
   type: z.string().optional().default("shape"),
 });
 
+export const SandboxArtifactSchema = z.object({
+  path: z.string(),
+  name: z.string(),
+  tool: z.string().optional().default("sandbox"),
+  download_url: z.string(),
+});
+
 export const AgentChatResponseSchema = z.object({
   status: z.string().default("OK"),
   reply: z.string().default(""),
@@ -61,6 +68,8 @@ export const AgentChatResponseSchema = z.object({
   latency_ms: z.number().optional(),
   tool_trace: z.array(ToolTraceItemSchema).optional().default([]),
   created_shapes: z.array(CreatedShapeSchema).optional().default([]),
+  artifacts: z.array(SandboxArtifactSchema).optional().default([]),
+  sandbox_persistent: z.boolean().optional().default(false),
 });
 
 export const PenpotUserRowSchema = z.object({

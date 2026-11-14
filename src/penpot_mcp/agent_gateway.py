@@ -1239,6 +1239,8 @@ class AgentTurnResult:
     vision_summary: Optional[dict[str, Any]] = None
     created_shapes: list[dict[str, Any]] = field(default_factory=list)
     tool_trace: list[dict[str, Any]] = field(default_factory=list)
+    artifacts: list[dict[str, Any]] = field(default_factory=list)
+    sandbox_persistent: bool = False
     fallback_reasons: list[str] = field(default_factory=list)
     latency_ms: float = 0.0
 
@@ -2593,9 +2595,18 @@ class PenpotAgentGateway:
         quick_action: str | None = None,
         history: list[dict[str, Any]] | None = None,
         attachment_ids: list[str] | None = None,
+        sandbox_persistent: bool | None = None,
     ) -> AgentTurnResult:
         """Run an end-to-end Penpot AI Studio turn with multi-user profile isolation and pgvector Canvas Vision."""
+        from penpot_mcp.services.sandbox_sessions import sandbox_sessions
         from penpot_mcp.services.vision import sync_and_query_canvas_vision
+
+        eff_sid = session_id or "default"
+        if sandbox_persistent is not None:
+            sb_state = await sandbox_sessions.set_policy(eff_sid, bool(sandbox_persistent))
+        else:
+            sb_state = await sandbox_sessions.get_session(eff_sid)
+        turn_artifacts: list[dict[str, Any]] = []
 
         started = time.monotonic()
         canvas_ctx = await self.resolve_target_canvas(file_id=file_id, page_id=page_id)
@@ -2768,6 +2779,17 @@ class PenpotAgentGateway:
                 tool_out = await self._execute_agent_tool_call(
                     fname, fargs, canvas_ctx, tool_trace, created_shapes
                 )
+                if isinstance(tool_out, dict) and fname in ("media_sandbox_ffmpeg", "design_suite_sandbox"):
+                    out_paths: list[str] = []
+                    if isinstance(tool_out.get("output_path"), str) and tool_out["output_path"]:
+                        out_paths.append(tool_out["output_path"])
+                    for p_item in tool_out.get("pages_rendered") or []:
+                        if isinstance(p_item, str) and p_item not in out_paths:
+                            out_paths.append(p_item)
+                    for rel_p in out_paths:
+                        art = await sandbox_sessions.register_artifact(eff_sid, rel_p, tool=fname)
+                        if all(a.get("path") != art["path"] for a in turn_artifacts):
+                            turn_artifacts.append(art)
                 response_parts.append(
                     {
                         "functionResponse": {
@@ -2822,6 +2844,8 @@ class PenpotAgentGateway:
             },
             created_shapes=created_shapes,
             tool_trace=tool_trace,
+            artifacts=turn_artifacts,
+            sandbox_persistent=bool(sb_state.get("persistent")),
             fallback_reasons=fallback_reasons,
             latency_ms=latency,
         )

@@ -603,6 +603,23 @@ body {
   accent-color: var(--sky);
 }
 
+.artifact-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--sky);
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: 6px;
+  padding: 4px 9px;
+  text-decoration: none;
+}
+
+.artifact-pill:hover {
+  background: rgba(56, 189, 248, 0.22);
+}
+
 /* Cards & Forms */
 .card {
   background: var(--bg-1);

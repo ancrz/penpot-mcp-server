@@ -291,8 +291,62 @@ async def agent_chat_route(request):
             if isinstance(payload.get("attachment_ids"), list)
             else None
         ),
+        sandbox_persistent=(
+            bool(payload["sandbox_persistent"])
+            if "sandbox_persistent" in payload and payload["sandbox_persistent"] is not None
+            else None
+        ),
     )
     return JSONResponse(asdict(turn), headers=_cors_headers())
+
+
+@mcp.custom_route("/agent/sandbox/session", methods=["GET", "OPTIONS"])
+async def agent_sandbox_session_route(request):
+    """Inspect current sandbox session persistence policy and generated artifacts."""
+    from starlette.responses import Response
+    from penpot_mcp.services.sandbox_sessions import sandbox_sessions
+
+    if request.method == "OPTIONS":
+        return Response(status_code=204, headers=_cors_headers())
+    sid = request.query_params.get("session_id") or "default"
+    state = await sandbox_sessions.get_session(sid)
+    return JSONResponse({"status": "OK", **state}, headers=_cors_headers())
+
+
+@mcp.custom_route("/agent/sandbox/policy", methods=["POST", "OPTIONS"])
+async def agent_sandbox_policy_route(request):
+    """Toggle no-expiration (persistent) vs ephemeral TTL sandbox mode for a chat session."""
+    from starlette.responses import Response
+    from penpot_mcp.services.sandbox_sessions import sandbox_sessions
+
+    if request.method == "OPTIONS":
+        return Response(status_code=204, headers=_cors_headers())
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    sid = str(payload.get("session_id") or "default")
+    persistent = bool(payload.get("persistent", False))
+    state = await sandbox_sessions.set_policy(sid, persistent)
+    return JSONResponse({"status": "OK", **state}, headers=_cors_headers())
+
+
+@mcp.custom_route("/agent/sandbox/download", methods=["GET", "OPTIONS"])
+async def agent_sandbox_download_route(request):
+    """Safely download a generated artifact from /sandbox."""
+    from starlette.responses import Response
+    from penpot_mcp.services.sandbox_sessions import resolve_sandbox_download
+
+    if request.method == "OPTIONS":
+        return Response(status_code=204, headers=_cors_headers())
+    rel_path = request.query_params.get("path") or ""
+    try:
+        target = resolve_sandbox_download(rel_path)
+    except ValueError as exc:
+        return JSONResponse({"status": "PARAM_ERROR", "error": str(exc)}, status_code=400, headers=_cors_headers())
+    except FileNotFoundError as exc:
+        return JSONResponse({"status": "NOT_FOUND", "error": str(exc)}, status_code=404, headers=_cors_headers())
+    return FileResponse(target, filename=target.name, headers=_cors_headers())
 
 
 @mcp.custom_route("/agent/upload", methods=["POST", "OPTIONS"])

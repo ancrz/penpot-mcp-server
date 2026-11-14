@@ -19,6 +19,7 @@ interface ChatMessage {
   attachments?: UploadedAttachment[];
   trace?: AgentChatResponse["tool_trace"];
   createdShapes?: AgentChatResponse["created_shapes"];
+  artifacts?: AgentChatResponse["artifacts"];
   latencyMs?: number;
   timestamp: string;
 }
@@ -88,6 +89,7 @@ export default function App() {
   const [attachments, setAttachments] = useState<UploadedAttachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const [importPenpot, setImportPenpot] = useState(false);
+  const [sandboxPersistent, setSandboxPersistent] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -261,6 +263,7 @@ export default function App() {
           prompt: effectiveText,
           quick_action: quickAction,
           attachment_ids: activeAttachments.map((a) => a.id),
+          sandbox_persistent: sandboxPersistent,
         }),
       });
       const parsed = AgentChatResponseSchema.parse(await res.json());
@@ -272,6 +275,7 @@ export default function App() {
           text: parsed.reply || `Estado: ${parsed.status}`,
           trace: parsed.tool_trace,
           createdShapes: parsed.created_shapes,
+          artifacts: parsed.artifacts,
           latencyMs: parsed.latency_ms,
           timestamp: nowLabel(),
         },
@@ -531,6 +535,20 @@ export default function App() {
                     ))}
                   </div>
                 )}
+                {m.artifacts && m.artifacts.length > 0 && (
+                  <div className="shapes-row">
+                    {m.artifacts.map((art) => (
+                      <a
+                        key={art.path}
+                        className="artifact-pill"
+                        href={art.download_url}
+                        download={art.name}
+                      >
+                        ⬇ {art.name}
+                      </a>
+                    ))}
+                  </div>
+                )}
                 {m.trace && m.trace.length > 0 && (
                   <div className="trace-pill">
                     ⚡ {m.trace.map((t) => `${t.tool}.${t.action} (${t.status})`).join(" · ")}
@@ -596,6 +614,28 @@ export default function App() {
                     onChange={(e) => setImportPenpot(e.target.checked)}
                   />
                   <span>Importar .penpot al proyecto</span>
+                </label>
+                <label className="import-toggle" htmlFor={`${baseId}-sandbox-persistent`}>
+                  <input
+                    id={`${baseId}-sandbox-persistent`}
+                    type="checkbox"
+                    checked={sandboxPersistent}
+                    onChange={(e) => {
+                      const next = e.target.checked;
+                      setSandboxPersistent(next);
+                      void fetch("/agent/sandbox/policy", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ session_id: "default", persistent: next }),
+                      });
+                      setToast(
+                        next
+                          ? "Sandbox sin expiración activado (sesión larga)"
+                          : "Sandbox en modo efímero (TTL 30 min)",
+                      );
+                    }}
+                  />
+                  <span>🔒 Sandbox sin expiración (sesión larga)</span>
                 </label>
               </div>
               <label htmlFor={`${baseId}-prompt`} className="visually-hidden">
