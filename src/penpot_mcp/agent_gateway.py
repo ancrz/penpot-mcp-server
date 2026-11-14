@@ -2681,6 +2681,8 @@ class PenpotAgentGateway:
         attachments_section = (
             "\n\n=== ATTACHED FILES & TEMPLATES CONTEXT ===\n"
             + "\n---\n".join(att_blocks)
+            + "\n(Sandbox tools available: `media_sandbox_ffmpeg` for image/video probe/resize/crop/convert, "
+            "`design_suite_sandbox` for svg_optimize/raster_to_svg/extract_palette/wcag_contrast/remove_background/doc_extract/pdf_render_pages/data_sandbox_query.)"
             + "\n==========================================="
             if att_blocks
             else ""

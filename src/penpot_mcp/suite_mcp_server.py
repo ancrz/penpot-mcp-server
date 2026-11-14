@@ -299,8 +299,13 @@ async def doc_extract(
 
         doc = Document(str(src))
         paras = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
+        table_lines: list[str] = []
+        for t in doc.tables[:10]:
+            for row in t.rows[:30]:
+                table_lines.append(" | ".join(cell.text.strip().replace("\n", " ") for cell in row.cells))
         meta["paragraphs"] = len(paras)
-        text = "\n".join(paras)
+        meta["tables"] = len(doc.tables)
+        text = "\n".join(paras + (["", "### Tablas"] + table_lines if table_lines else []))
     elif ext == ".xlsx":
         from openpyxl import load_workbook  # type: ignore[import-untyped]
 
