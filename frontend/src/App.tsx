@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent, useCallback, useEffect, useId, useRef, useState } from "react";
 import {
   AgentChatResponse,
   AgentChatResponseSchema,
@@ -15,8 +15,20 @@ interface ChatMessage {
   role: "user" | "assistant";
   text: string;
   trace?: AgentChatResponse["tool_trace"];
+  createdShapes?: AgentChatResponse["created_shapes"];
   latencyMs?: number;
+  timestamp: string;
 }
+
+type StudioTab = "chat" | "routing" | "keys" | "users" | "inst";
+
+const TABS: { id: StudioTab; label: string; shortLabel: string }[] = [
+  { id: "chat", label: "💬 Studio Chat", shortLabel: "Chat" },
+  { id: "routing", label: "🤖 Agente / Perfil", shortLabel: "Agente" },
+  { id: "keys", label: "🔑 API Keys", shortLabel: "Keys" },
+  { id: "users", label: "👥 Usuarios & pgvector", shortLabel: "Usuarios" },
+  { id: "inst", label: "🏗️ Arquitectura", shortLabel: "Stack" },
+];
 
 const QUICK_ACTIONS = [
   { id: "vision_scan", label: "👁️ Ojos pgvector", prompt: "¿Qué ves actualmente en el lienzo de Penpot según pgvector?" },
@@ -28,16 +40,44 @@ const QUICK_ACTIONS = [
   { id: "inspect_css", label: "Inspect CSS", prompt: "Extract CSS for the active selection or page shape" },
 ];
 
+const PROVIDER_MODELS: Record<string, { label: string; models: string[] }> = {
+  gemini: {
+    label: "Google Gemini",
+    models: ["gemini-3.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro"],
+  },
+  anthropic: {
+    label: "Anthropic Claude",
+    models: ["claude-sonnet-4-20250514", "claude-3-7-sonnet-latest", "claude-3-5-haiku-latest"],
+  },
+  openai: {
+    label: "OpenAI ChatGPT",
+    models: ["gpt-4.1", "gpt-4.1-mini", "o4-mini"],
+  },
+  deepseek: {
+    label: "DeepSeek",
+    models: ["deepseek-chat", "deepseek-reasoner"],
+  },
+  ollama: {
+    label: "Ollama Local",
+    models: ["qwen2.5-coder:14b", "llama3.2:latest", "deepseek-r1:8b"],
+  },
+};
+
+function nowLabel(): string {
+  return new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
+}
+
 export default function App() {
+  const baseId = useId();
   const [status, setStatus] = useState<AgentStatus | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
-  const [configOpen, setConfigOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<"routing" | "keys" | "users" | "inst">("routing");
+  const [activeTab, setActiveTab] = useState<StudioTab>("chat");
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: "welcome",
       role: "assistant",
-      text: "Penpot AI Studio v0.7.0 (React 19 + Zod · Python 3.14 + Pydantic · Go WebSocket Hub · Valkey 8.1 · PostgreSQL 17 + pgvector). Listo para diseñar.",
+      text: "Penpot AI Studio v0.7.0 listo. Conectado al Gateway MCP (Python 3.14 + Pydantic), Go WebSocket Hub, Valkey 8.1 y PostgreSQL 17 + pgvector.",
+      timestamp: nowLabel(),
     },
   ]);
   const [prompt, setPrompt] = useState("");
@@ -47,13 +87,29 @@ export default function App() {
   const [users, setUsers] = useState<PenpotUserRow[]>([]);
   const [visionQuery, setVisionQuery] = useState("Hero Pricing KPI Dark Card");
   const [visionResult, setVisionResult] = useState<PgvectorVisionResponse | null>(null);
+  const [visionLoading, setVisionLoading] = useState(false);
   const [provider, setProvider] = useState("gemini");
   const [model, setModel] = useState("gemini-3.5-flash-lite");
   const [apiKeyName, setApiKeyName] = useState("custom-profile");
   const [apiKeyVal, setApiKeyVal] = useState("");
+  const [showKey, setShowKey] = useState(false);
+  const [keyError, setKeyError] = useState("");
   const [toast, setToast] = useState("");
 
   const wsRef = useRef<WebSocket | null>(null);
+  const feedEndRef = useRef<HTMLDivElement | null>(null);
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const keyInputRef = useRef<HTMLInputElement | null>(null);
+
+  const showToast = useCallback((msg: string) => {
+    setToast(msg);
+  }, []);
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = window.setTimeout(() => setToast(""), 4000);
+    return () => window.clearTimeout(t);
+  }, [toast]);
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -78,6 +134,7 @@ export default function App() {
   }, []);
 
   const runVisionScan = useCallback(async (q: string) => {
+    setVisionLoading(true);
     try {
       const res = await fetch("/agent/vision", {
         method: "POST",
@@ -88,6 +145,8 @@ export default function App() {
       setVisionResult(parsed);
     } catch {
       /* ignore */
+    } finally {
+      setVisionLoading(false);
     }
   }, []);
 
@@ -121,11 +180,19 @@ export default function App() {
     };
   }, [refreshStatus, refreshUsers, runVisionScan]);
 
+  useEffect(() => {
+    feedEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messages.length, busy]);
+
   const sendPrompt = async (text: string, quickAction?: string) => {
     const trimmed = text.trim();
     if (!trimmed || busy) return;
+    setActiveTab("chat");
     setBusy(true);
-    setMessages((prev) => [...prev, { id: `u-${Date.now()}`, role: "user", text: trimmed }]);
+    setMessages((prev) => [
+      ...prev,
+      { id: `u-${Date.now()}`, role: "user", text: trimmed, timestamp: nowLabel() },
+    ]);
     setPrompt("");
     try {
       const res = await fetch("/agent/chat", {
@@ -141,23 +208,37 @@ export default function App() {
           role: "assistant",
           text: parsed.reply || `Estado: ${parsed.status}`,
           trace: parsed.tool_trace,
+          createdShapes: parsed.created_shapes,
           latencyMs: parsed.latency_ms,
+          timestamp: nowLabel(),
         },
       ]);
       void refreshStatus();
     } catch (err) {
       setMessages((prev) => [
         ...prev,
-        { id: `e-${Date.now()}`, role: "assistant", text: `Error Zod/Gateway: ${String(err)}` },
+        {
+          id: `e-${Date.now()}`,
+          role: "assistant",
+          text: `Error Zod/Gateway: ${String(err)}`,
+          timestamp: nowLabel(),
+        },
       ]);
     } finally {
       setBusy(false);
     }
   };
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleChatSubmit = (e: FormEvent) => {
     e.preventDefault();
     void sendPrompt(prompt);
+  };
+
+  const handleComposerKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      void sendPrompt(prompt);
+    }
   };
 
   const switchUser = async (u: PenpotUserRow) => {
@@ -166,191 +247,597 @@ export default function App() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ user_id: u.id, email: u.email }),
     });
-    setToast(`Sesión activa cambiada a ${u.fullname}`);
+    showToast(`Sesión activa cambiada a ${u.fullname}`);
     await refreshStatus();
     await refreshUsers();
   };
 
-  const saveProfile = async () => {
+  const handleProviderChange = (nextProvider: string) => {
+    setProvider(nextProvider);
+    const presets = PROVIDER_MODELS[nextProvider]?.models;
+    if (presets && presets.length > 0) {
+      setModel(presets[0]);
+    }
+  };
+
+  const saveProfile = async (e: FormEvent) => {
+    e.preventDefault();
     await fetch("/agent/profile", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ provider, model, preset: "auto" }),
+      body: JSON.stringify({ provider, model: model.trim(), preset: "auto" }),
     });
-    setToast(`Perfil actualizado: ${provider}:${model}`);
+    showToast(`Perfil actualizado: ${provider}:${model}`);
     await refreshStatus();
   };
 
-  const saveKey = async () => {
-    if (!apiKeyVal.trim()) return;
+  const saveKey = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!apiKeyVal.trim()) {
+      setKeyError("Ingresa una API Key válida antes de guardar.");
+      keyInputRef.current?.focus();
+      return;
+    }
+    setKeyError("");
     await fetch("/agent/providers", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        name: apiKeyName,
+        name: apiKeyName.trim() || "custom-profile",
         provider,
         api_key: apiKeyVal.trim(),
-        model,
+        model: model.trim(),
         activate: true,
       }),
     });
     setApiKeyVal("");
-    setToast(`API Key guardada y activada para ${provider}`);
+    showToast(`API Key guardada y activada para ${provider}`);
     await refreshStatus();
   };
+
+  const handleVisionSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    void runVisionScan(visionQuery);
+  };
+
+  const handleTabKeyDown = (e: KeyboardEvent<HTMLButtonElement>, idx: number) => {
+    let nextIdx = idx;
+    if (e.key === "ArrowRight") nextIdx = (idx + 1) % TABS.length;
+    else if (e.key === "ArrowLeft") nextIdx = (idx - 1 + TABS.length) % TABS.length;
+    else if (e.key === "Home") nextIdx = 0;
+    else if (e.key === "End") nextIdx = TABS.length - 1;
+    else return;
+    e.preventDefault();
+    const nextTab = TABS[nextIdx];
+    setActiveTab(nextTab.id);
+    tabRefs.current[nextIdx]?.focus();
+  };
+
+  const valkeyHits = status?.valkey_cache?.hits ?? 0;
+  const valkeyMisses = status?.valkey_cache?.misses ?? 0;
+  const valkeyTotal = valkeyHits + valkeyMisses;
+  const valkeyHitRate = valkeyTotal > 0 ? Math.round((valkeyHits / valkeyTotal) * 100) : 0;
 
   return (
     <div className="app-shell">
       <header className="header">
         <div className="header-top">
           <div className="brand">
-            <span className="brand-badge">React + Zod</span>
-            <span>Penpot AI Studio v0.7.0</span>
+            <span className="brand-badge">React 19 + Zod</span>
+            <h1 className="brand-title">Penpot AI Studio <span className="version-tag">v0.7.0</span></h1>
           </div>
-          <div style={{ display: "flex", gap: "6px" }}>
-            <button className="btn" type="button" onClick={() => setConfigOpen((v) => !v)}>
-              {configOpen ? "✕ Volver al Chat" : "⚙️ Config"}
-            </button>
-            <button className="btn" type="button" onClick={() => void refreshStatus()}>
-              Sync
+          <div className="header-actions">
+            <button
+              className="btn btn-ghost"
+              type="button"
+              onClick={() => void refreshStatus()}
+              title="Sincronizar estado del gateway"
+            >
+              ↻ Sync
             </button>
           </div>
         </div>
-        <div className="badges-row">
+
+        <div className="badges-row" aria-label="Telemetría en vivo">
           <span className="badge ok">👤 {status?.active_user?.fullname ?? "Penpot User"}</span>
-          <span className="badge">{status?.active_provider}:{status?.default_model}</span>
-          <span className={`badge ${wsConnected ? "ok" : ""}`}>
+          <span className="badge accent">
+            🤖 {status?.active_provider ?? provider}:{status?.default_model ?? model}
+          </span>
+          <span className={`badge ${wsConnected ? "ok" : "warn"}`}>
             🔌 Go WS: {wsConnected ? "Live" : "Offline"}
           </span>
           <span className="badge ok">
             👁️ pgvector {status?.pgvector?.pgvector_version || "0.8.7"} ({status?.pgvector?.indexed_shapes_count ?? 0})
           </span>
           <span className="badge">
-            ⚡ Valkey {status?.valkey_cache?.hits ?? 0}H/{status?.valkey_cache?.misses ?? 0}M
+            ⚡ Valkey {valkeyHits}H/{valkeyMisses}M
           </span>
         </div>
+
+        <nav className="tablist-wrap" aria-label="Navegación del estudio">
+          <div className="tablist" role="tablist" aria-label="Secciones de Penpot AI Studio">
+            {TABS.map((t, idx) => {
+              const selected = activeTab === t.id;
+              return (
+                <button
+                  key={t.id}
+                  ref={(el) => {
+                    tabRefs.current[idx] = el;
+                  }}
+                  id={`${baseId}-tab-${t.id}`}
+                  type="button"
+                  role="tab"
+                  aria-selected={selected}
+                  tabIndex={selected ? 0 : -1}
+                  className="tab-btn"
+                  onClick={() => setActiveTab(t.id)}
+                  onKeyDown={(e) => handleTabKeyDown(e, idx)}
+                >
+                  {t.label}
+                </button>
+              );
+            })}
+          </div>
+        </nav>
       </header>
 
-      {configOpen ? (
-        <section className="drawer">
-          {toast && <div className="badge ok">{toast}</div>}
-          <div className="tabs">
-            <button className={`tab ${activeTab === "routing" ? "active" : ""}`} onClick={() => setActiveTab("routing")}>
-              1. Agente / Perfil
-            </button>
-            <button className={`tab ${activeTab === "keys" ? "active" : ""}`} onClick={() => setActiveTab("keys")}>
-              2. API Keys
-            </button>
-            <button className={`tab ${activeTab === "users" ? "active" : ""}`} onClick={() => setActiveTab("users")}>
-              3. Usuarios & pgvector
-            </button>
-            <button className={`tab ${activeTab === "inst" ? "active" : ""}`} onClick={() => setActiveTab("inst")}>
-              4. Arquitectura
-            </button>
-          </div>
+      {toast && (
+        <div className="toast-banner" role="status" aria-live="polite">
+          <span>✓ {toast}</span>
+          <button type="button" className="toast-close" onClick={() => setToast("")} aria-label="Cerrar notificación">
+            ✕
+          </button>
+        </div>
+      )}
 
-          {activeTab === "routing" && (
-            <div className="card">
-              <strong>Selector de Proveedor y Modelo (Pydantic + Zod)</strong>
-              <select className="input" value={provider} onChange={(e) => setProvider(e.target.value)}>
-                <option value="gemini">Google Gemini</option>
-                <option value="anthropic">Anthropic Claude</option>
-                <option value="openai">OpenAI ChatGPT</option>
-                <option value="deepseek">DeepSeek</option>
-                <option value="ollama">Ollama Local</option>
-              </select>
-              <input className="input" value={model} onChange={(e) => setModel(e.target.value)} placeholder="Modelo activo" />
-              <button className="btn btn-primary" type="button" onClick={() => void saveProfile()}>
-                ✓ Aplicar Perfil
-              </button>
-            </div>
-          )}
-
-          {activeTab === "keys" && (
-            <div className="card">
-              <strong>Bóveda de API Keys por Usuario</strong>
-              <input className="input" value={apiKeyName} onChange={(e) => setApiKeyName(e.target.value)} placeholder="Nombre de perfil" />
-              <input className="input" type="password" value={apiKeyVal} onChange={(e) => setApiKeyVal(e.target.value)} placeholder="sk-... / AIza..." />
-              <button className="btn btn-primary" type="button" onClick={() => void saveKey()}>
-                🔑 Guardar / Reemplazar Key
-              </button>
-            </div>
-          )}
-
-          {activeTab === "users" && (
-            <>
-              <div className="card">
-                <strong>👥 Usuarios Autenticados en Penpot (public.profile)</strong>
-                {users.map((u) => (
-                  <div key={u.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" }}>
-                    <div>
-                      <div style={{ fontSize: "12px", fontWeight: 600 }}>{u.fullname}</div>
-                      <div style={{ fontSize: "11px", color: "var(--text-1)" }}>{u.email} · Sesiones: {u.active_sessions}</div>
-                    </div>
-                    <button className="btn btn-primary" type="button" onClick={() => void switchUser(u)}>
-                      {status?.active_user?.email === u.email ? "✓ Activo" : "Cambiar"}
-                    </button>
-                  </div>
-                ))}
-              </div>
-              <div className="card">
-                <strong>👁️ Escáner Semántico & Espacial (pgvector + Valkey)</strong>
-                <div style={{ display: "flex", gap: "6px" }}>
-                  <input className="input" value={visionQuery} onChange={(e) => setVisionQuery(e.target.value)} />
-                  <button className="btn btn-primary" type="button" onClick={() => void runVisionScan(visionQuery)}>
-                    🔍 Escanear
-                  </button>
-                </div>
-                <div className="code-box">{visionResult?.prompt_summary || "Sin resultados"}</div>
-              </div>
-            </>
-          )}
-
-          {activeTab === "inst" && (
-            <div className="card">
-              <strong>Stack Verificado v0.7.0</strong>
-              <div className="code-box">
-                {`Frontend: React 19 + TypeScript + Zod (Nginx Unprivileged :8787)\nWebSockets: Go 1.24 Hub (/plugin/ws -> penpot-ws-go:4402)\nBackend MCP: Python 3.14 + FastMCP + Pydantic v2 (:8787 internal)\nCache: Valkey 8.1 (volatile-lfu, O(1) epoch invalidation)\nVector DB: PostgreSQL 17.12 + pgvector 0.8.7 + pg_trgm 1.6`}
-              </div>
-            </div>
-          )}
-        </section>
-      ) : (
-        <>
-          <div className="quick-strip">
+      <main className="main-content">
+        {/* TAB 0: STUDIO CHAT */}
+        <section
+          role="tabpanel"
+          id={`${baseId}-panel-chat`}
+          aria-labelledby={`${baseId}-tab-chat`}
+          hidden={activeTab !== "chat"}
+          className="panel-chat"
+        >
+          <div className="quick-strip" aria-label="Acciones rápidas de diseño">
             {QUICK_ACTIONS.map((qa) => (
-              <button key={qa.id} className="chip" type="button" onClick={() => void sendPrompt(qa.prompt, qa.id)}>
+              <button
+                key={qa.id}
+                className="chip"
+                type="button"
+                disabled={busy}
+                onClick={() => void sendPrompt(qa.prompt, qa.id)}
+              >
                 {qa.label}
               </button>
             ))}
           </div>
 
-          <main className="feed">
+          <div className="feed">
+            {messages.length === 1 && (
+              <div className="studio-context-banner">
+                <div className="context-item">
+                  <span className="context-label">Plugin Penpot</span>
+                  <strong className="context-val">
+                    {status?.plugin?.connected ? "Conectado" : "Listo (esperando canvas)"}
+                  </strong>
+                </div>
+                <div className="context-item">
+                  <span className="context-label">Archivo / Página</span>
+                  <strong className="context-val">
+                    {status?.plugin?.file_name || "Proyecto activo"} · {status?.plugin?.page_name || "Page 1"}
+                  </strong>
+                </div>
+                <div className="context-item">
+                  <span className="context-label">Índice Espacial</span>
+                  <strong className="context-val">
+                    {visionResult?.total_shapes ?? status?.pgvector?.indexed_shapes_count ?? 0} shapes indexados
+                  </strong>
+                </div>
+              </div>
+            )}
+
             {messages.map((m) => (
-              <div key={m.id} className={`msg ${m.role}`}>
-                <div>{m.text}</div>
+              <article key={m.id} className={`msg ${m.role}`}>
+                <div className="msg-meta">
+                  <span className="msg-author">{m.role === "user" ? "Tú" : "Penpot AI"}</span>
+                  <span className="msg-time">{m.timestamp}</span>
+                </div>
+                <div className="msg-body">{m.text}</div>
+                {m.createdShapes && m.createdShapes.length > 0 && (
+                  <div className="shapes-row">
+                    {m.createdShapes.map((s) => (
+                      <span key={s.shape_id} className="shape-pill">
+                        ◆ {s.name} ({s.type})
+                      </span>
+                    ))}
+                  </div>
+                )}
                 {m.trace && m.trace.length > 0 && (
                   <div className="trace-pill">
                     ⚡ {m.trace.map((t) => `${t.tool}.${t.action} (${t.status})`).join(" · ")}
                     {m.latencyMs ? ` · ${m.latencyMs.toFixed(1)} ms` : ""}
                   </div>
                 )}
-              </div>
+              </article>
             ))}
-          </main>
 
-          <form className="composer" onSubmit={handleSubmit}>
-            <textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              placeholder="Describe el componente o acción en Penpot..."
-            />
-            <button className="btn btn-primary" type="submit" disabled={busy}>
-              {busy ? "..." : "Generar"}
+            {busy && (
+              <div className="msg assistant typing-indicator" aria-live="polite">
+                Ejecutando herramientas en Penpot MCP...
+              </div>
+            )}
+            <div ref={feedEndRef} />
+          </div>
+
+          <form className="composer" onSubmit={handleChatSubmit}>
+            <div className="composer-input-wrap">
+              <label htmlFor={`${baseId}-prompt`} className="visually-hidden">
+                Instrucción para el agente de Penpot
+              </label>
+              <textarea
+                id={`${baseId}-prompt`}
+                name="prompt"
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                onKeyDown={handleComposerKeyDown}
+                placeholder="Describe el componente, layout o acción en Penpot... (Enter para enviar)"
+                rows={2}
+              />
+              <span className="composer-hint">Enter enviar · Shift+Enter nueva línea</span>
+            </div>
+            <button className="btn btn-primary btn-send" type="submit" disabled={busy || !prompt.trim()}>
+              {busy ? "Procesando..." : "Generar →"}
             </button>
           </form>
-        </>
-      )}
+        </section>
+
+        {/* TAB 1: AGENTE / PERFIL */}
+        <section
+          role="tabpanel"
+          id={`${baseId}-panel-routing`}
+          aria-labelledby={`${baseId}-tab-routing`}
+          hidden={activeTab !== "routing"}
+          className="panel-scroll"
+        >
+          <div className="panel-inner">
+            <form className="card" onSubmit={(e) => void saveProfile(e)} aria-labelledby={`${baseId}-routing-title`}>
+              <div className="card-head">
+                <h2 id={`${baseId}-routing-title`} className="card-title">
+                  Selector de Proveedor y Modelo
+                </h2>
+                <span className="badge accent">Pydantic + Zod</span>
+              </div>
+              <p className="card-desc">
+                Configura el motor de IA activo para la sesión de{" "}
+                <strong>{status?.active_user?.fullname ?? "Penpot User"}</strong>.
+              </p>
+
+              <div className="field">
+                <label htmlFor={`${baseId}-provider`}>Proveedor de IA</label>
+                <select
+                  id={`${baseId}-provider`}
+                  name="provider"
+                  className="input"
+                  value={provider}
+                  onChange={(e) => handleProviderChange(e.target.value)}
+                >
+                  {Object.entries(PROVIDER_MODELS).map(([key, info]) => (
+                    <option key={key} value={key}>
+                      {info.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="field">
+                <label htmlFor={`${baseId}-model`}>Modelo activo</label>
+                <input
+                  id={`${baseId}-model`}
+                  name="model"
+                  className="input"
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  placeholder="Ej. gemini-3.5-flash-lite"
+                  autoCorrect="off"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  required
+                />
+                <div className="preset-chips" aria-label="Modelos recomendados">
+                  {(PROVIDER_MODELS[provider]?.models ?? []).map((presetModel) => (
+                    <button
+                      key={presetModel}
+                      type="button"
+                      className={`chip ${model === presetModel ? "chip-selected" : ""}`}
+                      onClick={() => setModel(presetModel)}
+                    >
+                      {presetModel}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="card-actions">
+                <button className="btn btn-primary" type="submit">
+                  ✓ Aplicar Perfil
+                </button>
+              </div>
+            </form>
+          </div>
+        </section>
+
+        {/* TAB 2: API KEYS */}
+        <section
+          role="tabpanel"
+          id={`${baseId}-panel-keys`}
+          aria-labelledby={`${baseId}-tab-keys`}
+          hidden={activeTab !== "keys"}
+          className="panel-scroll"
+        >
+          <div className="panel-inner">
+            <form className="card" onSubmit={(e) => void saveKey(e)} noValidate aria-labelledby={`${baseId}-keys-title`}>
+              <div className="card-head">
+                <h2 id={`${baseId}-keys-title`} className="card-title">
+                  Bóveda de API Keys por Usuario
+                </h2>
+                <span className="badge ok">👤 {status?.active_user?.fullname ?? "Penpot User"}</span>
+              </div>
+              <p className="card-desc">
+                Guarda o reemplaza la credencial asociada a tu perfil de Penpot sin reiniciar contenedores.
+              </p>
+
+              <div className="field-grid-2">
+                <div className="field">
+                  <label htmlFor={`${baseId}-key-provider`}>Proveedor destino</label>
+                  <select
+                    id={`${baseId}-key-provider`}
+                    name="key_provider"
+                    className="input"
+                    value={provider}
+                    onChange={(e) => handleProviderChange(e.target.value)}
+                  >
+                    {Object.entries(PROVIDER_MODELS).map(([key, info]) => (
+                      <option key={key} value={key}>
+                        {info.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="field">
+                  <label htmlFor={`${baseId}-key-name`}>Nombre de perfil</label>
+                  <input
+                    id={`${baseId}-key-name`}
+                    name="profile_name"
+                    className="input"
+                    value={apiKeyName}
+                    onChange={(e) => setApiKeyName(e.target.value)}
+                    placeholder="custom-profile"
+                    autoCorrect="off"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="field">
+                <label htmlFor={`${baseId}-key-val`}>API Key</label>
+                <div className="password-row">
+                  <input
+                    ref={keyInputRef}
+                    id={`${baseId}-key-val`}
+                    name="api_key"
+                    className="input"
+                    type={showKey ? "text" : "password"}
+                    value={apiKeyVal}
+                    onChange={(e) => {
+                      setApiKeyVal(e.target.value);
+                      if (keyError) setKeyError("");
+                    }}
+                    placeholder="sk-... / AIza..."
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                    aria-invalid={Boolean(keyError)}
+                    aria-describedby={keyError ? `${baseId}-key-err` : `${baseId}-key-hint`}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-nowrap"
+                    aria-pressed={showKey}
+                    aria-label={showKey ? "Ocultar API Key" : "Mostrar API Key"}
+                    onClick={() => setShowKey((v) => !v)}
+                  >
+                    {showKey ? "🙈 Ocultar" : "👁️ Ver"}
+                  </button>
+                </div>
+                {keyError ? (
+                  <span id={`${baseId}-key-err`} className="field-error" role="alert">
+                    {keyError}
+                  </span>
+                ) : (
+                  <span id={`${baseId}-key-hint`} className="field-hint">
+                    Se almacenará vinculada al usuario activo y se activará inmediatamente para {provider}.
+                  </span>
+                )}
+              </div>
+
+              <div className="card-actions">
+                <button className="btn btn-primary" type="submit">
+                  🔑 Guardar / Reemplazar Key
+                </button>
+              </div>
+            </form>
+          </div>
+        </section>
+
+        {/* TAB 3: USUARIOS & PGVECTOR */}
+        <section
+          role="tabpanel"
+          id={`${baseId}-panel-users`}
+          aria-labelledby={`${baseId}-tab-users`}
+          hidden={activeTab !== "users"}
+          className="panel-scroll"
+        >
+          <div className="panel-inner">
+            <div className="card">
+              <div className="card-head">
+                <h2 className="card-title">👥 Usuarios Autenticados en Penpot</h2>
+                <span className="badge">public.profile ({users.length})</span>
+              </div>
+              <div className="user-list">
+                {users.map((u) => {
+                  const isActive = status?.active_user?.email === u.email;
+                  return (
+                    <div key={u.id} className={`user-row ${isActive ? "user-row-active" : ""}`}>
+                      <div className="user-info">
+                        <div className="user-name-line">
+                          <span className="user-name">{u.fullname}</span>
+                          {u.has_ai_profile && <span className="badge accent">Perfil IA</span>}
+                        </div>
+                        <div className="user-sub">
+                          {u.email} · Sesiones activas: {u.active_sessions}
+                        </div>
+                      </div>
+                      <button
+                        className={`btn ${isActive ? "btn-success-outline" : "btn-primary"}`}
+                        type="button"
+                        disabled={isActive}
+                        onClick={() => void switchUser(u)}
+                      >
+                        {isActive ? "✓ Activo" : "Cambiar"}
+                      </button>
+                    </div>
+                  );
+                })}
+                {users.length === 0 && <p className="card-desc">No se detectaron usuarios en public.profile.</p>}
+              </div>
+            </div>
+
+            <div className="card">
+              <div className="card-head">
+                <h2 className="card-title">👁️ Escáner Semántico & Espacial</h2>
+                <span className="badge ok">pgvector + Valkey</span>
+              </div>
+
+              <search>
+                <form className="vision-search-row" onSubmit={handleVisionSubmit}>
+                  <label htmlFor={`${baseId}-vision-q`} className="visually-hidden">
+                    Consulta semántica en el lienzo
+                  </label>
+                  <input
+                    id={`${baseId}-vision-q`}
+                    name="q"
+                    type="search"
+                    className="input"
+                    value={visionQuery}
+                    onChange={(e) => setVisionQuery(e.target.value)}
+                    placeholder="Buscar elementos en el lienzo (ej. Hero Card, Navbar)..."
+                  />
+                  <button className="btn btn-primary btn-nowrap" type="submit" disabled={visionLoading}>
+                    {visionLoading ? "Escaneando..." : "🔍 Escanear"}
+                  </button>
+                </form>
+              </search>
+
+              <div className="kpi-grid">
+                <div className="kpi-box">
+                  <span className="kpi-label">Motor Vectorial</span>
+                  <strong className="kpi-val">{visionResult?.engine || "pgvector"}</strong>
+                </div>
+                <div className="kpi-box">
+                  <span className="kpi-label">Shapes Indexados</span>
+                  <strong className="kpi-val">
+                    {visionResult?.total_shapes ?? status?.pgvector?.indexed_shapes_count ?? 0}
+                  </strong>
+                </div>
+                <div className="kpi-box">
+                  <span className="kpi-label">Origen Libre Sugerido</span>
+                  <strong className="kpi-val">
+                    {visionResult?.recommended_free_origin
+                      ? `(${visionResult.recommended_free_origin.x}, ${visionResult.recommended_free_origin.y})`
+                      : "N/A"}
+                  </strong>
+                </div>
+              </div>
+
+              <div className="code-box">{visionResult?.prompt_summary || "Sin resultados para esta consulta."}</div>
+            </div>
+          </div>
+        </section>
+
+        {/* TAB 4: ARQUITECTURA */}
+        <section
+          role="tabpanel"
+          id={`${baseId}-panel-inst`}
+          aria-labelledby={`${baseId}-tab-inst`}
+          hidden={activeTab !== "inst"}
+          className="panel-scroll"
+        >
+          <div className="panel-inner">
+            <div className="card">
+              <div className="card-head">
+                <h2 className="card-title">Stack Verificado v0.7.0</h2>
+                <span className="badge ok">En Línea</span>
+              </div>
+              <div className="arch-grid">
+                <div className="arch-tile">
+                  <div className="arch-tile-head">
+                    <strong>Frontend SPA</strong>
+                    <span className="badge accent">Nginx :8787</span>
+                  </div>
+                  <p>React 19 + TypeScript + Zod. Validación estricta de contratos en runtime y rutas unificadas.</p>
+                </div>
+                <div className="arch-tile">
+                  <div className="arch-tile-head">
+                    <strong>WebSockets Hub</strong>
+                    <span className={`badge ${wsConnected ? "ok" : "warn"}`}>
+                      {wsConnected ? "Go 1.24 Live" : "Offline"}
+                    </span>
+                  </div>
+                  <p>
+                    Servicio dedicado en Go (<code>penpot-ws-go:4402</code>) gestionando <code>/plugin/ws</code> con
+                    baja latencia.
+                  </p>
+                </div>
+                <div className="arch-tile">
+                  <div className="arch-tile-head">
+                    <strong>Backend MCP</strong>
+                    <span className="badge ok">Python 3.14</span>
+                  </div>
+                  <p>FastMCP + Pydantic v2. 14 sub-herramientas comprimidas con trazabilidad y perfiles por usuario.</p>
+                </div>
+                <div className="arch-tile">
+                  <div className="arch-tile-head">
+                    <strong>Caché Valkey 8.1</strong>
+                    <span className="badge">{valkeyHitRate}% Hit Rate</span>
+                  </div>
+                  <p>
+                    Hits: {valkeyHits} · Misses: {valkeyMisses} · TTL: {status?.valkey_cache?.default_ttl ?? 120}s
+                    (invalidación O(1) por epoch).
+                  </p>
+                </div>
+                <div className="arch-tile arch-tile-wide">
+                  <div className="arch-tile-head">
+                    <strong>Base de Datos Vectorial</strong>
+                    <span className="badge ok">
+                      PostgreSQL 17.12 + pgvector {status?.pgvector?.pgvector_version || "0.8.7"}
+                    </span>
+                  </div>
+                  <p>
+                    Extensión <code>pg_trgm</code> {status?.pgvector?.pg_trgm_version || "1.6"} · Shapes indexados:{" "}
+                    {status?.pgvector?.indexed_shapes_count ?? 0} · Usuarios con perfil IA:{" "}
+                    {status?.pgvector?.users_with_ai_profiles ?? 0}.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
     </div>
   );
 }
