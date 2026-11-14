@@ -1376,8 +1376,8 @@ class PenpotAgentGateway:
         }
         self.active_user: dict[str, Any] = {
             "id": None,
-            "email": settings.penpot_email or "anthony_cruz@outlook.com",
-            "fullname": "Anthony Cruz",
+            "email": settings.penpot_email or "",
+            "fullname": "Penpot Designer",
             "lang": "es",
             "theme": "default",
             "resolved_via": "default",
@@ -2043,6 +2043,8 @@ class PenpotAgentGateway:
 
     def get_status(self) -> dict[str, Any]:
         """Return safe, non-secret status of the AI Gateway, Plugin WS, and Circuit Breakers."""
+        from penpot_mcp.agent.tokens import DESIGN_TOKENS, PROVIDER_CATALOG, QUICK_ACTIONS_CATALOG
+        from penpot_mcp.services.agent_store import agent_store
         from penpot_mcp.services.db import db
 
         routes = self.build_route_chain()
@@ -2057,6 +2059,10 @@ class PenpotAgentGateway:
             "fallback_model": self.active_profile.get("fallback_model", settings.penpot_agent_fallback_model),
             "rpm": self.active_profile.get("rpm", settings.penpot_agent_rpm),
             "addendum_version": self.agent_instructions.get("version", 1),
+            "provider_catalog": PROVIDER_CATALOG,
+            "quick_actions": QUICK_ACTIONS_CATALOG,
+            "design_tokens": DESIGN_TOKENS,
+            "agent_db": agent_store.describe(),
             "has_addendum": bool(self.agent_instructions.get("addendum")),
             "has_primary_key": any(
                 c.get("provider") == "gemini" and c.get("has_key") for c in self.list_catalog()
@@ -2617,9 +2623,10 @@ class PenpotAgentGateway:
             session_id=session_id,
             file_id=canvas_ctx.get("file_id"),
         )
+        from penpot_mcp.services.agent_store import agent_store
         from penpot_mcp.services.db import db
 
-        persisted_chat = await db.get_chat_session(eff_sid)
+        persisted_chat = await agent_store.get_chat_session(eff_sid)
         prev_revn = persisted_chat.get("last_revn") if persisted_chat else None
         canvas_delta = await db.get_canvas_delta_since(
             str(canvas_ctx.get("file_id") or ""), prev_revn

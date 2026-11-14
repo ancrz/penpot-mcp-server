@@ -77,6 +77,13 @@ class Settings(BaseSettings):
     penpot_agent_rpm: int = 15
     penpot_agent_max_turns: int = 6
 
+    # Agentic Layer Dual-DB & Sandbox Isolation
+    # Backends: "penpot_postgres" (default shared DB), "postgres" (2nd PG instance), "sqlite" (local file)
+    agent_db_backend: str = "penpot_postgres"
+    agent_db_url: str = ""
+    sandbox_root: str = "/sandbox"
+    sandbox_ephemeral_ttl_sec: int = 1800
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
     @property

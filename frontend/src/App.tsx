@@ -1,6 +1,5 @@
 import { ChangeEvent, DragEvent, FormEvent, KeyboardEvent, useCallback, useEffect, useId, useRef, useState } from "react";
 import {
-  AgentChatResponse,
   AgentChatResponseSchema,
   AgentStatus,
   AgentStatusSchema,
@@ -13,65 +12,11 @@ import {
   UploadedAttachment,
   UploadResponseSchema,
 } from "./schemas";
-
-interface ChatMessage {
-  id: string;
-  role: "user" | "assistant";
-  text: string;
-  attachments?: UploadedAttachment[];
-  trace?: AgentChatResponse["tool_trace"];
-  createdShapes?: AgentChatResponse["created_shapes"];
-  artifacts?: AgentChatResponse["artifacts"];
-  latencyMs?: number;
-  timestamp: string;
-}
-
-type StudioTab = "chat" | "routing" | "keys" | "users" | "inst";
-
-const TABS: { id: StudioTab; label: string; shortLabel: string }[] = [
-  { id: "chat", label: "💬 Studio Chat", shortLabel: "Chat" },
-  { id: "routing", label: "🤖 Agente / Perfil", shortLabel: "Agente" },
-  { id: "keys", label: "🔑 API Keys", shortLabel: "Keys" },
-  { id: "users", label: "👥 Usuarios & pgvector", shortLabel: "Usuarios" },
-  { id: "inst", label: "🏗️ Arquitectura", shortLabel: "Stack" },
-];
-
-const QUICK_ACTIONS = [
-  { id: "vision_scan", label: "👁️ Ojos pgvector", prompt: "¿Qué ves actualmente en el lienzo de Penpot según pgvector?" },
-  { id: "hero_card", label: "+ Hero Card", prompt: "Create a Hero Card component on the active page" },
-  { id: "login_form", label: "+ Login Form", prompt: "Create a modern SSO Login Form card" },
-  { id: "pricing_card", label: "+ Pricing Card", prompt: "Create an Enterprise AI Pricing Card" },
-  { id: "navbar", label: "+ Navbar", prompt: "Create a responsive Navigation Bar header" },
-  { id: "bind_tokens", label: "Bind Tokens", prompt: "Auto-bind library design tokens on the active page" },
-  { id: "inspect_css", label: "Inspect CSS", prompt: "Extract CSS for the active selection or page shape" },
-];
-
-const PROVIDER_MODELS: Record<string, { label: string; models: string[] }> = {
-  gemini: {
-    label: "Google Gemini",
-    models: ["gemini-3.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro"],
-  },
-  anthropic: {
-    label: "Anthropic Claude",
-    models: ["claude-sonnet-4-20250514", "claude-3-7-sonnet-latest", "claude-3-5-haiku-latest"],
-  },
-  openai: {
-    label: "OpenAI ChatGPT",
-    models: ["gpt-4.1", "gpt-4.1-mini", "o4-mini"],
-  },
-  deepseek: {
-    label: "DeepSeek",
-    models: ["deepseek-chat", "deepseek-reasoner"],
-  },
-  ollama: {
-    label: "Ollama Local",
-    models: ["qwen2.5-coder:14b", "llama3.2:latest", "deepseek-r1:8b"],
-  },
-};
-
-function nowLabel(): string {
-  return new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
-}
+import { ChatMessage, StudioTab, TABS, nowLabel } from "./types";
+import { ProfileTab } from "./tabs/ProfileTab";
+import { KeysTab } from "./tabs/KeysTab";
+import { UsersTab } from "./tabs/UsersTab";
+import { ArchitectureTab } from "./tabs/ArchitectureTab";
 
 export default function App() {
   const baseId = useId();
@@ -109,7 +54,9 @@ export default function App() {
   const [visionResult, setVisionResult] = useState<PgvectorVisionResponse | null>(null);
   const [visionLoading, setVisionLoading] = useState(false);
   const [provider, setProvider] = useState("gemini");
-  const [model, setModel] = useState("gemini-3.5-flash-lite");
+  const [model, setModel] = useState("");
+  const providerCatalog = status?.provider_catalog ?? {};
+  const quickActions = status?.quick_actions ?? [];
   const [apiKeyName, setApiKeyName] = useState("custom-profile");
   const [apiKeyVal, setApiKeyVal] = useState("");
   const [showKey, setShowKey] = useState(false);
@@ -389,7 +336,7 @@ export default function App() {
 
   const handleProviderChange = (nextProvider: string) => {
     setProvider(nextProvider);
-    const presets = PROVIDER_MODELS[nextProvider]?.models;
+    const presets = providerCatalog[nextProvider]?.models;
     if (presets && presets.length > 0) {
       setModel(presets[0]);
     }
@@ -564,7 +511,7 @@ export default function App() {
           </div>
 
           <div className="quick-strip" aria-label="Acciones rápidas de diseño">
-            {QUICK_ACTIONS.map((qa) => (
+            {quickActions.map((qa) => (
               <button
                 key={qa.id}
                 className="chip"
@@ -758,351 +705,61 @@ export default function App() {
           </form>
         </section>
 
-        {/* TAB 1: AGENTE / PERFIL */}
-        <section
-          role="tabpanel"
-          id={`${baseId}-panel-routing`}
-          aria-labelledby={`${baseId}-tab-routing`}
+        <ProfileTab
+          baseId={baseId}
           hidden={activeTab !== "routing"}
-          className="panel-scroll"
-        >
-          <div className="panel-inner">
-            <form className="card" onSubmit={(e) => void saveProfile(e)} aria-labelledby={`${baseId}-routing-title`}>
-              <div className="card-head">
-                <h2 id={`${baseId}-routing-title`} className="card-title">
-                  Selector de Proveedor y Modelo
-                </h2>
-                <span className="badge accent">Pydantic + Zod</span>
-              </div>
-              <p className="card-desc">
-                Configura el motor de IA activo para la sesión de{" "}
-                <strong>{status?.active_user?.fullname ?? "Penpot User"}</strong>.
-              </p>
+          status={status}
+          providerCatalog={providerCatalog}
+          provider={provider}
+          model={model}
+          onProviderChange={handleProviderChange}
+          onModelChange={setModel}
+          onSaveProfile={saveProfile}
+        />
 
-              <div className="field">
-                <label htmlFor={`${baseId}-provider`}>Proveedor de IA</label>
-                <select
-                  id={`${baseId}-provider`}
-                  name="provider"
-                  className="input"
-                  value={provider}
-                  onChange={(e) => handleProviderChange(e.target.value)}
-                >
-                  {Object.entries(PROVIDER_MODELS).map(([key, info]) => (
-                    <option key={key} value={key}>
-                      {info.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="field">
-                <label htmlFor={`${baseId}-model`}>Modelo activo</label>
-                <input
-                  id={`${baseId}-model`}
-                  name="model"
-                  className="input"
-                  value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                  placeholder="Ej. gemini-3.5-flash-lite"
-                  autoCorrect="off"
-                  autoCapitalize="none"
-                  spellCheck={false}
-                  required
-                />
-                <div className="preset-chips" aria-label="Modelos recomendados">
-                  {(PROVIDER_MODELS[provider]?.models ?? []).map((presetModel) => (
-                    <button
-                      key={presetModel}
-                      type="button"
-                      className={`chip ${model === presetModel ? "chip-selected" : ""}`}
-                      onClick={() => setModel(presetModel)}
-                    >
-                      {presetModel}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="card-actions">
-                <button className="btn btn-primary" type="submit">
-                  ✓ Aplicar Perfil
-                </button>
-              </div>
-            </form>
-          </div>
-        </section>
-
-        {/* TAB 2: API KEYS */}
-        <section
-          role="tabpanel"
-          id={`${baseId}-panel-keys`}
-          aria-labelledby={`${baseId}-tab-keys`}
+        <KeysTab
+          baseId={baseId}
           hidden={activeTab !== "keys"}
-          className="panel-scroll"
-        >
-          <div className="panel-inner">
-            <form className="card" onSubmit={(e) => void saveKey(e)} noValidate aria-labelledby={`${baseId}-keys-title`}>
-              <div className="card-head">
-                <h2 id={`${baseId}-keys-title`} className="card-title">
-                  Bóveda de API Keys por Usuario
-                </h2>
-                <span className="badge ok">👤 {status?.active_user?.fullname ?? "Penpot User"}</span>
-              </div>
-              <p className="card-desc">
-                Guarda o reemplaza la credencial asociada a tu perfil de Penpot sin reiniciar contenedores.
-              </p>
+          status={status}
+          providerCatalog={providerCatalog}
+          provider={provider}
+          apiKeyName={apiKeyName}
+          apiKeyVal={apiKeyVal}
+          showKey={showKey}
+          keyError={keyError}
+          keyInputRef={keyInputRef}
+          onProviderChange={handleProviderChange}
+          onApiKeyNameChange={setApiKeyName}
+          onApiKeyValChange={(val) => {
+            setApiKeyVal(val);
+            if (keyError) setKeyError("");
+          }}
+          onToggleShowKey={() => setShowKey((v) => !v)}
+          onSaveKey={saveKey}
+        />
 
-              <div className="field-grid-2">
-                <div className="field">
-                  <label htmlFor={`${baseId}-key-provider`}>Proveedor destino</label>
-                  <select
-                    id={`${baseId}-key-provider`}
-                    name="key_provider"
-                    className="input"
-                    value={provider}
-                    onChange={(e) => handleProviderChange(e.target.value)}
-                  >
-                    {Object.entries(PROVIDER_MODELS).map(([key, info]) => (
-                      <option key={key} value={key}>
-                        {info.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="field">
-                  <label htmlFor={`${baseId}-key-name`}>Nombre de perfil</label>
-                  <input
-                    id={`${baseId}-key-name`}
-                    name="profile_name"
-                    className="input"
-                    value={apiKeyName}
-                    onChange={(e) => setApiKeyName(e.target.value)}
-                    placeholder="custom-profile"
-                    autoCorrect="off"
-                    autoCapitalize="none"
-                    spellCheck={false}
-                    required
-                  />
-                </div>
-              </div>
-
-              <div className="field">
-                <label htmlFor={`${baseId}-key-val`}>API Key</label>
-                <div className="password-row">
-                  <input
-                    ref={keyInputRef}
-                    id={`${baseId}-key-val`}
-                    name="api_key"
-                    className="input"
-                    type={showKey ? "text" : "password"}
-                    value={apiKeyVal}
-                    onChange={(e) => {
-                      setApiKeyVal(e.target.value);
-                      if (keyError) setKeyError("");
-                    }}
-                    placeholder="sk-... / AIza..."
-                    autoComplete="off"
-                    autoCorrect="off"
-                    autoCapitalize="none"
-                    spellCheck={false}
-                    aria-invalid={Boolean(keyError)}
-                    aria-describedby={keyError ? `${baseId}-key-err` : `${baseId}-key-hint`}
-                  />
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-nowrap"
-                    aria-pressed={showKey}
-                    aria-label={showKey ? "Ocultar API Key" : "Mostrar API Key"}
-                    onClick={() => setShowKey((v) => !v)}
-                  >
-                    {showKey ? "🙈 Ocultar" : "👁️ Ver"}
-                  </button>
-                </div>
-                {keyError ? (
-                  <span id={`${baseId}-key-err`} className="field-error" role="alert">
-                    {keyError}
-                  </span>
-                ) : (
-                  <span id={`${baseId}-key-hint`} className="field-hint">
-                    Se almacenará vinculada al usuario activo y se activará inmediatamente para {provider}.
-                  </span>
-                )}
-              </div>
-
-              <div className="card-actions">
-                <button className="btn btn-primary" type="submit">
-                  🔑 Guardar / Reemplazar Key
-                </button>
-              </div>
-            </form>
-          </div>
-        </section>
-
-        {/* TAB 3: USUARIOS & PGVECTOR */}
-        <section
-          role="tabpanel"
-          id={`${baseId}-panel-users`}
-          aria-labelledby={`${baseId}-tab-users`}
+        <UsersTab
+          baseId={baseId}
           hidden={activeTab !== "users"}
-          className="panel-scroll"
-        >
-          <div className="panel-inner">
-            <div className="card">
-              <div className="card-head">
-                <h2 className="card-title">👥 Usuarios Autenticados en Penpot</h2>
-                <span className="badge">public.profile ({users.length})</span>
-              </div>
-              <div className="user-list">
-                {users.map((u) => {
-                  const isActive = status?.active_user?.email === u.email;
-                  return (
-                    <div key={u.id} className={`user-row ${isActive ? "user-row-active" : ""}`}>
-                      <div className="user-info">
-                        <div className="user-name-line">
-                          <span className="user-name">{u.fullname}</span>
-                          {u.has_ai_profile && <span className="badge accent">Perfil IA</span>}
-                        </div>
-                        <div className="user-sub">
-                          {u.email} · Sesiones activas: {u.active_sessions}
-                        </div>
-                      </div>
-                      <button
-                        className={`btn ${isActive ? "btn-success-outline" : "btn-primary"}`}
-                        type="button"
-                        disabled={isActive}
-                        onClick={() => void switchUser(u)}
-                      >
-                        {isActive ? "✓ Activo" : "Cambiar"}
-                      </button>
-                    </div>
-                  );
-                })}
-                {users.length === 0 && <p className="card-desc">No se detectaron usuarios en public.profile.</p>}
-              </div>
-            </div>
+          status={status}
+          users={users}
+          visionQuery={visionQuery}
+          visionResult={visionResult}
+          visionLoading={visionLoading}
+          onVisionQueryChange={setVisionQuery}
+          onVisionSubmit={handleVisionSubmit}
+          onSwitchUser={switchUser}
+        />
 
-            <div className="card">
-              <div className="card-head">
-                <h2 className="card-title">👁️ Escáner Semántico & Espacial</h2>
-                <span className="badge ok">pgvector + Valkey</span>
-              </div>
-
-              <search>
-                <form className="vision-search-row" onSubmit={handleVisionSubmit}>
-                  <label htmlFor={`${baseId}-vision-q`} className="visually-hidden">
-                    Consulta semántica en el lienzo
-                  </label>
-                  <input
-                    id={`${baseId}-vision-q`}
-                    name="q"
-                    type="search"
-                    className="input"
-                    value={visionQuery}
-                    onChange={(e) => setVisionQuery(e.target.value)}
-                    placeholder="Buscar elementos en el lienzo (ej. Hero Card, Navbar)..."
-                  />
-                  <button className="btn btn-primary btn-nowrap" type="submit" disabled={visionLoading}>
-                    {visionLoading ? "Escaneando..." : "🔍 Escanear"}
-                  </button>
-                </form>
-              </search>
-
-              <div className="kpi-grid">
-                <div className="kpi-box">
-                  <span className="kpi-label">Motor Vectorial</span>
-                  <strong className="kpi-val">{visionResult?.engine || "pgvector"}</strong>
-                </div>
-                <div className="kpi-box">
-                  <span className="kpi-label">Shapes Indexados</span>
-                  <strong className="kpi-val">
-                    {visionResult?.total_shapes ?? status?.pgvector?.indexed_shapes_count ?? 0}
-                  </strong>
-                </div>
-                <div className="kpi-box">
-                  <span className="kpi-label">Origen Libre Sugerido</span>
-                  <strong className="kpi-val">
-                    {visionResult?.recommended_free_origin
-                      ? `(${visionResult.recommended_free_origin.x}, ${visionResult.recommended_free_origin.y})`
-                      : "N/A"}
-                  </strong>
-                </div>
-              </div>
-
-              <div className="code-box">{visionResult?.prompt_summary || "Sin resultados para esta consulta."}</div>
-            </div>
-          </div>
-        </section>
-
-        {/* TAB 4: ARQUITECTURA */}
-        <section
-          role="tabpanel"
-          id={`${baseId}-panel-inst`}
-          aria-labelledby={`${baseId}-tab-inst`}
+        <ArchitectureTab
+          baseId={baseId}
           hidden={activeTab !== "inst"}
-          className="panel-scroll"
-        >
-          <div className="panel-inner">
-            <div className="card">
-              <div className="card-head">
-                <h2 className="card-title">Stack Verificado v0.7.0</h2>
-                <span className="badge ok">En Línea</span>
-              </div>
-              <div className="arch-grid">
-                <div className="arch-tile">
-                  <div className="arch-tile-head">
-                    <strong>Frontend SPA</strong>
-                    <span className="badge accent">Nginx :8787</span>
-                  </div>
-                  <p>React 19 + TypeScript + Zod. Validación estricta de contratos en runtime y rutas unificadas.</p>
-                </div>
-                <div className="arch-tile">
-                  <div className="arch-tile-head">
-                    <strong>WebSockets Hub</strong>
-                    <span className={`badge ${wsConnected ? "ok" : "warn"}`}>
-                      {wsConnected ? "Go 1.24 Live" : "Offline"}
-                    </span>
-                  </div>
-                  <p>
-                    Servicio dedicado en Go (<code>penpot-ws-go:4402</code>) gestionando <code>/plugin/ws</code> con
-                    baja latencia.
-                  </p>
-                </div>
-                <div className="arch-tile">
-                  <div className="arch-tile-head">
-                    <strong>Backend MCP</strong>
-                    <span className="badge ok">Python 3.14</span>
-                  </div>
-                  <p>FastMCP + Pydantic v2. 14 sub-herramientas comprimidas con trazabilidad y perfiles por usuario.</p>
-                </div>
-                <div className="arch-tile">
-                  <div className="arch-tile-head">
-                    <strong>Caché Valkey 8.1</strong>
-                    <span className="badge">{valkeyHitRate}% Hit Rate</span>
-                  </div>
-                  <p>
-                    Hits: {valkeyHits} · Misses: {valkeyMisses} · TTL: {status?.valkey_cache?.default_ttl ?? 120}s
-                    (invalidación O(1) por epoch).
-                  </p>
-                </div>
-                <div className="arch-tile arch-tile-wide">
-                  <div className="arch-tile-head">
-                    <strong>Base de Datos Vectorial</strong>
-                    <span className="badge ok">
-                      PostgreSQL 17.12 + pgvector {status?.pgvector?.pgvector_version || "0.8.7"}
-                    </span>
-                  </div>
-                  <p>
-                    Extensión <code>pg_trgm</code> {status?.pgvector?.pg_trgm_version || "1.6"} · Shapes indexados:{" "}
-                    {status?.pgvector?.indexed_shapes_count ?? 0} · Usuarios con perfil IA:{" "}
-                    {status?.pgvector?.users_with_ai_profiles ?? 0}.
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
+          status={status}
+          wsConnected={wsConnected}
+          valkeyHitRate={valkeyHitRate}
+          valkeyHits={valkeyHits}
+          valkeyMisses={valkeyMisses}
+        />
       </main>
     </div>
   );

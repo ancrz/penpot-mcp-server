@@ -24,13 +24,35 @@ export const PgvectorStatusSchema = z.object({
   users_with_ai_profiles: z.number().default(0),
 });
 
+export const ProviderCatalogEntrySchema = z.object({
+  label: z.string(),
+  models: z.array(z.string()).default([]),
+  default_base_url: z.string(),
+});
+export type ProviderCatalogEntry = z.infer<typeof ProviderCatalogEntrySchema>;
+
+export const QuickActionSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  prompt: z.string(),
+});
+
+export const AgentDbConfigSchema = z.object({
+  backend: z.string().default("penpot_postgres"),
+  isolated: z.boolean().default(false),
+  target: z.string().default("penpot-postgres"),
+});
+
 export const AgentStatusSchema = z.object({
   status: z.string(),
   active_user: ActiveUserSchema.optional(),
   active_provider: z.string().default("gemini"),
-  default_model: z.string().default("gemini-3.5-flash-lite"),
+  default_model: z.string().default(""),
   valkey_cache: ValkeyStatsSchema.optional(),
   pgvector: PgvectorStatusSchema.optional(),
+  provider_catalog: z.record(z.string(), ProviderCatalogEntrySchema).optional().default({}),
+  quick_actions: z.array(QuickActionSchema).optional().default([]),
+  agent_db: AgentDbConfigSchema.optional(),
   plugin: z
     .object({
       connected: z.boolean().default(false),
