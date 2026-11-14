@@ -13,8 +13,10 @@ dependencies = [
     "redis>=5.2.0",
     "uvicorn>=0.54.0",
     "websockets>=17.4",
-    "sqlite-vec>=0.1.9",
 ]
+
+[project.optional-dependencies]
+sqlite-vec = ["sqlite-vec>=0.1.9"]
 
 [project.scripts]
 penpot-mcp = "penpot_mcp.server:main"
@@ -37,14 +39,17 @@ testpaths = ["tests"]
 addopts = "-m 'not integration' --ignore=tests/test_e2e_login_form.py"
 markers = [
     "integration: tests requiring live Penpot instance",
+    "e2e: end-to-end Playwright browser tests against live stack",
 ]
 
 [dependency-groups]
 dev = [
     "mypy>=2.4.1",
+    "playwright>=1.65.2",
     "pytest>=9.2.0",
     "pytest-asyncio>=1.5.0",
     "ruff>=0.17.5",
+    "sqlite-vec>=0.1.9",
 ]
 
 [tool.mypy]
