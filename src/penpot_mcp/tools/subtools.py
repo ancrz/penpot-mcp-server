@@ -75,8 +75,16 @@ SUBTOOLS_CATALOG: dict[str, dict[str, Any]] = {
     },
     "projects": {
         "domain": "Projects & Teams",
-        "actions": ["list_teams", "list_projects", "create_project", "list_files", "search_files"],
-        "description": "List teams, list/create projects, list project files, and search files across projects.",
+        "actions": [
+            "list_teams",
+            "list_projects",
+            "create_project",
+            "list_files",
+            "search_files",
+            "team_members",
+            "team_fonts",
+        ],
+        "description": "List teams, team members, custom team fonts, list/create projects, list project files, and search files across projects.",
     },
     "files": {
         "domain": "File Lifecycle, History & Snapshots",
@@ -85,6 +93,8 @@ SUBTOOLS_CATALOG: dict[str, dict[str, Any]] = {
             "pages",
             "history",
             "libraries",
+            "share_links",
+            "live_presence",
             "create",
             "rename",
             "duplicate",
@@ -94,7 +104,7 @@ SUBTOOLS_CATALOG: dict[str, dict[str, Any]] = {
             "create_snapshot",
             "list_snapshots",
         ],
-        "description": "Manage Penpot design files, pages metadata, revision history, diffs, raw Transit data, and version snapshots.",
+        "description": "Manage Penpot design files, pages metadata, revision history, share links, live presence, diffs, raw Transit data, and version snapshots.",
     },
     "shapes": {
         "domain": "Shape Reading, Hierarchy & Code Gen",
@@ -477,7 +487,15 @@ async def projects(
 
     act = (action or "list_projects").strip().lower()
     tracker = RequestTelemetry("projects", act)
-    valid = ["list_teams", "list_projects", "create_project", "list_files", "search_files"]
+    valid = [
+        "list_teams",
+        "list_projects",
+        "create_project",
+        "list_files",
+        "search_files",
+        "team_members",
+        "team_fonts",
+    ]
 
     try:
         if act in ("list_teams", "teams"):
@@ -496,6 +514,14 @@ async def projects(
             if not query:
                 return _missing_param_response("projects", act, ["query"], tracker, verbosity)
             raw = await _proj_mod.search_files(query)
+        elif act in ("team_members", "members"):
+            if not team_id:
+                return _missing_param_response("projects", act, ["team_id"], tracker, verbosity)
+            raw = await db.list_team_members(team_id)
+        elif act in ("team_fonts", "fonts"):
+            if not team_id:
+                return _missing_param_response("projects", act, ["team_id"], tracker, verbosity)
+            raw = await db.list_team_fonts(team_id)
         else:
             return _invalid_action_response("projects", action, valid, tracker, verbosity)
 
@@ -540,6 +566,8 @@ async def files(
         "pages",
         "history",
         "libraries",
+        "share_links",
+        "live_presence",
         "create",
         "rename",
         "duplicate",
@@ -567,6 +595,14 @@ async def files(
             if not file_id:
                 return _missing_param_response("files", act, ["file_id"], tracker, verbosity)
             raw = await _files_mod.get_file_libraries(file_id)
+        elif act in ("share_links", "shares"):
+            if not file_id:
+                return _missing_param_response("files", act, ["file_id"], tracker, verbosity)
+            raw = await db.list_file_share_links(file_id)
+        elif act in ("live_presence", "presence"):
+            if not file_id:
+                return _missing_param_response("files", act, ["file_id"], tracker, verbosity)
+            raw = await db.list_file_presence(file_id)
         elif act in ("create", "create_file"):
             if not project_id or not name:
                 return _missing_param_response("files", act, ["project_id", "name"], tracker, verbosity)
@@ -1455,7 +1491,7 @@ async def system(
 
     act = (action or "profile").strip().lower()
     tracker = RequestTelemetry("system", act)
-    valid = ["query_db", "webhooks", "profile"]
+    valid = ["query_db", "webhooks", "profile", "audit_log", "cache_stats"]
 
     try:
         if act in ("query_db", "query_database", "sql"):
@@ -1468,6 +1504,13 @@ async def system(
             raw = await _db_mod.get_webhooks(team_id)
         elif act in ("profile", "get_profile"):
             raw = await api.get_profile()
+        elif act in ("audit_log", "audit"):
+            raw = await db.list_audit_logs()
+        elif act in ("cache_stats", "stats"):
+            raw = {
+                "valkey": db.cache.stats(),
+                "pgvector": await db.get_pgvector_status(),
+            }
         else:
             return _invalid_action_response("system", action, valid, tracker, verbosity)
 

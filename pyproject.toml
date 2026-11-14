@@ -3,7 +3,7 @@ name = "penpot-mcp"
 dynamic = ["version"]
 description = "MCP server for self-hosted Penpot — AI-powered UI/UX design and prototyping"
 readme = {text = "", content-type = "text/plain"}
-requires-python = ">=3.13"
+requires-python = ">=3.14"
 dependencies = [
     "mcp[cli]>=1.30.0,<2",
     "asyncpg>=0.32.0",
@@ -47,14 +47,14 @@ dev = [
 ]
 
 [tool.mypy]
-python_version = "3.13"
+python_version = "3.14"
 
 [[tool.mypy.overrides]]
 module = ["asyncpg", "asyncpg.*"]
 ignore_missing_imports = true
 
 [tool.ruff]
-target-version = "py313"
+target-version = "py314"
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F"]

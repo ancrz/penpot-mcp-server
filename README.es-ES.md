@@ -5,9 +5,11 @@
 **Acceso a la herramienta de diseño impulsada por IA para Penpot autoalojado a través del Protocolo de Contexto de Modelo (MCP).**
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Python 3.13+](https://img.shields.io/badge/Python-3.13+-yellow.svg)](https://python.org)
+[![Python 3.14+](https://img.shields.io/badge/Python-3.14+-yellow.svg)](https://python.org)
+[![Go 1.24 WS](https://img.shields.io/badge/Go_1.24-WebSocket_Hub-00ADD8.svg)](https://go.dev)
+[![React 19 + Zod](https://img.shields.io/badge/React_19-Zod_+_Nginx-61DAFB.svg)](https://react.dev)
 [![MCP Protocol](https://img.shields.io/badge/MCP-2025--03--26-green.svg)](https://modelcontextprotocol.io)
-[![Version: 0.6.0](https://img.shields.io/badge/Version-0.6.0-purple.svg)](pyproject.toml)
+[![Version: 0.7.0](https://img.shields.io/badge/Version-0.7.0-purple.svg)](pyproject.toml)
 [![Penpot 2.19.1](https://img.shields.io/badge/Penpot-2.19.1-teal.svg)](https://penpot.app)
 [![PostgreSQL 17 + pgvector 0.8.7](https://img.shields.io/badge/PostgreSQL_17-pgvector_0.8.7-blueviolet.svg)](https://github.com/pgvector/pgvector)
 [![Valkey 8.1](https://img.shields.io/badge/Valkey-8.1_Cache-red.svg)](https://valkey.io)
@@ -169,7 +171,10 @@ graph TB
 
 | Componente | Tecnología | Propósito |
 |---|---|---|
-| Lenguaje | Python 3.13 | Entorno de ejecución (`3.13-alpine` endurecido non-root) |
+| Lenguaje | Python 3.14 + Go 1.24 + TypeScript | MCP/Gateway (`3.14-alpine`), Hub WebSocket (`go 1.24`), SPA React |
+| Frontend SPA | [React 19](https://react.dev/) + [Zod](https://zod.dev/) + [Vite](https://vite.dev/) | SPA validada en runtime con Zod y servida por Nginx Unprivileged |
+| Proxy Inverso | [Nginx Unprivileged 1.27](https://hub.docker.com/r/nginxinc/nginx-unprivileged) | Gateway single-origin `:8787`, `gzip`, CSP, upgrade WS y assets inmutables |
+| Hub WebSocket | Go 1.24 (`coder/websocket`) | Hub concurrente por goroutines en `/plugin/ws` (`penpot-ws-go:4402`) |
 | SDK MCP | [FastMCP](https://github.com/modelcontextprotocol/python-sdk) | Protocolo `2025-03-26`, HTTP Streamable y registro de herramientas |
 | HTTP / Gateway | [Starlette](https://www.starlette.io/) + [Uvicorn](https://www.uvicorn.org/) | Endpoints REST (`/agent/*`, `/plugin/*`) y WS same-origin |
 | Base Vectorial y DB | [PostgreSQL 15](https://www.postgresql.org/) + [`pgvector 0.8.7`](https://github.com/pgvector/pgvector) + `pg_trgm 1.6` | Datos Penpot (`public.profile`), perfiles IA aislados y visión HNSW `vector(64)` |

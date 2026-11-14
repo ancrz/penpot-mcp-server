@@ -702,6 +702,104 @@ class PenpotDB:
         await self.cache.set_json("vision", cache_suffix, rows)
         return rows
 
+    async def list_team_members(self, team_id: str) -> list[dict]:
+        """List members and roles for a team from team_profile_rel + profile."""
+        if not self._pool:
+            return []
+        return await self.fetch(
+            """
+            SELECT p.id::text AS id,
+                   p.fullname,
+                   p.email,
+                   tpr.is_owner,
+                   tpr.is_admin,
+                   tpr.can_edit,
+                   tpr.created_at
+            FROM public.team_profile_rel tpr
+            JOIN public.profile p ON p.id = tpr.profile_id
+            WHERE tpr.team_id::text = $1 AND p.deleted_at IS NULL
+            ORDER BY tpr.is_owner DESC, tpr.is_admin DESC, p.fullname ASC
+            """,
+            team_id.strip(),
+        )
+
+    async def list_team_fonts(self, team_id: str) -> list[dict]:
+        """List custom fonts registered for a team from team_font_variant."""
+        if not self._pool:
+            return []
+        return await self.fetch(
+            """
+            SELECT id::text AS id,
+                   font_id::text AS font_id,
+                   font_family,
+                   font_weight,
+                   font_style,
+                   woff1_file_id::text AS woff1_file_id,
+                   woff2_file_id::text AS woff2_file_id,
+                   created_at
+            FROM public.team_font_variant
+            WHERE team_id::text = $1
+            ORDER BY font_family ASC, font_weight ASC
+            """,
+            team_id.strip(),
+        )
+
+    async def list_file_share_links(self, file_id: str) -> list[dict]:
+        """List active share links for a file from share_link."""
+        if not self._pool:
+            return []
+        return await self.fetch(
+            """
+            SELECT id::text AS id,
+                   who_comment,
+                   who_inspect,
+                   flags,
+                   pages::text AS pages,
+                   created_at
+            FROM public.share_link
+            WHERE file_id::text = $1
+            ORDER BY created_at DESC
+            """,
+            file_id.strip(),
+        )
+
+    async def list_file_presence(self, file_id: str) -> list[dict]:
+        """List live designers currently present in a file from presence + profile."""
+        if not self._pool:
+            return []
+        return await self.fetch(
+            """
+            SELECT pr.id::text AS session_id,
+                   p.id::text AS profile_id,
+                   p.fullname,
+                   p.email,
+                   pr.updated_at
+            FROM public.presence pr
+            JOIN public.profile p ON p.id = pr.profile_id
+            WHERE pr.file_id::text = $1
+            ORDER BY pr.updated_at DESC
+            """,
+            file_id.strip(),
+        )
+
+    async def list_audit_logs(self, limit: int = 25) -> list[dict]:
+        """List recent Penpot audit_log events."""
+        if not self._pool:
+            return []
+        return await self.fetch(
+            """
+            SELECT id::text AS id,
+                   name,
+                   type,
+                   profile_id::text AS profile_id,
+                   created_at
+            FROM public.audit_log
+            ORDER BY created_at DESC
+            LIMIT $1
+            """,
+            max(1, min(int(limit), 100)),
+        )
+
 
 # Singleton
 db = PenpotDB()

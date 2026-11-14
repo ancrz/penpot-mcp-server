@@ -1145,4 +1145,35 @@ async def test_valkey_cache_and_pg_migrator_configs(tmp_path):
     assert "Detected PGDATA version=15, target=17, dry_run=true" in res_dry.stdout
 
 
+@pytest.mark.asyncio
+async def test_compressed_db_gap_actions_and_nginx_config(monkeypatch):
+    import pathlib
+    from unittest.mock import AsyncMock
+    from penpot_mcp.tools.subtools import files, projects, system
+
+    monkeypatch.setattr("penpot_mcp.services.db.db.list_team_members", AsyncMock(return_value=[{"fullname": "Anthony"}]))
+    monkeypatch.setattr("penpot_mcp.services.db.db.list_team_fonts", AsyncMock(return_value=[{"font_family": "Inter"}]))
+    monkeypatch.setattr("penpot_mcp.services.db.db.list_file_share_links", AsyncMock(return_value=[{"id": "sl-1"}]))
+    monkeypatch.setattr("penpot_mcp.services.db.db.list_file_presence", AsyncMock(return_value=[{"fullname": "Anthony"}]))
+    monkeypatch.setattr("penpot_mcp.services.db.db.list_audit_logs", AsyncMock(return_value=[{"name": "login"}]))
+    monkeypatch.setattr("penpot_mcp.services.db.db.get_pgvector_status", AsyncMock(return_value={"pgvector_installed": True}))
+
+    p1 = json.loads(await projects(action="team_members", team_id="t1"))
+    p2 = json.loads(await projects(action="team_fonts", team_id="t1"))
+    f1 = json.loads(await files(action="share_links", file_id="f1"))
+    f2 = json.loads(await files(action="live_presence", file_id="f1"))
+    s1 = json.loads(await system(action="audit_log"))
+    s2 = json.loads(await system(action="cache_stats"))
+
+    assert p1["status"] == "OK" and p2["status"] == "OK"
+    assert f1["status"] == "OK" and f2["status"] == "OK"
+    assert s1["status"] == "OK" and s2["status"] == "OK"
+
+    root = pathlib.Path(__file__).resolve().parents[1]
+    nginx_conf = (root / "nginx" / "nginx.conf").read_text(encoding="utf-8")
+    assert "proxy_pass http://penpot-ws-go:4402/plugin/ws;" in nginx_conf
+    assert "proxy_pass http://penpot-mcp:8787/agent/;" in nginx_conf
+
+
+
 

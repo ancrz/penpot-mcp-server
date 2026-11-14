@@ -3,9 +3,11 @@
 **AI-powered design tool access for self-hosted Penpot via Model Context Protocol.**
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Python 3.13+](https://img.shields.io/badge/Python-3.13+-yellow.svg)](https://python.org)
+[![Python 3.14+](https://img.shields.io/badge/Python-3.14+-yellow.svg)](https://python.org)
+[![Go 1.24 WS](https://img.shields.io/badge/Go_1.24-WebSocket_Hub-00ADD8.svg)](https://go.dev)
+[![React 19 + Zod](https://img.shields.io/badge/React_19-Zod_+_Nginx-61DAFB.svg)](https://react.dev)
 [![MCP Protocol](https://img.shields.io/badge/MCP-2025--03--26-green.svg)](https://modelcontextprotocol.io)
-[![Version: 0.6.0](https://img.shields.io/badge/Version-0.6.0-purple.svg)](pyproject.toml)
+[![Version: 0.7.0](https://img.shields.io/badge/Version-0.7.0-purple.svg)](pyproject.toml)
 [![Penpot 2.19.1](https://img.shields.io/badge/Penpot-2.19.1-teal.svg)](https://penpot.app)
 [![PostgreSQL 17 + pgvector 0.8.7](https://img.shields.io/badge/PostgreSQL_17-pgvector_0.8.7-blueviolet.svg)](https://github.com/pgvector/pgvector)
 [![Valkey 8.1](https://img.shields.io/badge/Valkey-8.1_Cache-red.svg)](https://valkey.io)
@@ -167,7 +169,10 @@ graph TB
 
 | Component | Technology | Purpose |
 |---|---|---|
-| Language | Python 3.13 | Runtime (`3.13-alpine` hardened non-root container) |
+| Language | Python 3.14 + Go 1.24 + TypeScript | MCP/Gateway (`3.14-alpine`), WebSocket Hub (`go 1.24`), React SPA |
+| Frontend SPA | [React 19](https://react.dev/) + [Zod](https://zod.dev/) + [Vite](https://vite.dev/) | Runtime schema-validated SPA served via Nginx Unprivileged |
+| Reverse Proxy | [Nginx Unprivileged 1.27](https://hub.docker.com/r/nginxinc/nginx-unprivileged) | Single-origin `:8787` gateway, `gzip`, CSP, WS upgrade, immutable assets |
+| WebSocket Hub | Go 1.24 (`coder/websocket`) | High-concurrency `/plugin/ws` goroutine hub (`penpot-ws-go:4402`) |
 | MCP SDK | [FastMCP](https://github.com/modelcontextprotocol/python-sdk) | Protocol `2025-03-26`, Streamable HTTP & tool registration |
 | HTTP / Gateway | [Starlette](https://www.starlette.io/) + [Uvicorn](https://www.uvicorn.org/) | REST endpoints (`/agent/*`, `/plugin/*`) and same-origin WS |
 | Vector & DB | [PostgreSQL 15](https://www.postgresql.org/) + [`pgvector 0.8.7`](https://github.com/pgvector/pgvector) + `pg_trgm 1.6` | Penpot data (`public.profile`), isolated AI profiles, and `vector(64)` HNSW Canvas Vision |
