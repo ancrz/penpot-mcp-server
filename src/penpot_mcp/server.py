@@ -330,9 +330,31 @@ async def agent_chat_route(request):
             sandbox_persistent=turn.sandbox_persistent,
             last_revn=cur_revn,
         )
+        if agent_store.backend == "sqlite":
+            await agent_store.index_agent_memory(
+                "chat_turn",
+                f"{eff_sid}:{len(msgs)}",
+                f"{prompt or quick_action or ''} -> {turn.reply[:240]}",
+                session_id=eff_sid,
+            )
     except Exception as exc:
         logger.debug("Chat session persistence notice: %s", exc)
     return JSONResponse(asdict(turn), headers=_cors_headers())
+
+
+@mcp.custom_route("/agent/memory/search", methods=["GET", "OPTIONS"])
+async def agent_memory_search_route(request):
+    """Semantic vector search over sqlite-vec agent memory (chat turns & sandbox artifacts)."""
+    from starlette.responses import Response
+    from penpot_mcp.services.agent_store import agent_store
+
+    if request.method == "OPTIONS":
+        return Response(status_code=204, headers=_cors_headers())
+    q = (request.query_params.get("q") or "").strip()
+    kind = request.query_params.get("kind") or None
+    limit = min(20, max(1, int(request.query_params.get("limit") or 5)))
+    hits = await agent_store.search_agent_memory(q, kind=kind, limit=limit)
+    return JSONResponse({"status": "OK", "backend": agent_store.backend, "hits": hits}, headers=_cors_headers())
 
 
 @mcp.custom_route("/agent/chats", methods=["GET", "OPTIONS"])

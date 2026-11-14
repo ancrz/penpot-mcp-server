@@ -123,6 +123,18 @@ class SandboxSessionManager:
         artifacts.append(entry)
         state["artifacts"] = artifacts[-50:]
         await self._save(session_id, state)
+        try:
+            from penpot_mcp.services.agent_store import agent_store
+
+            if agent_store.backend == "sqlite":
+                await agent_store.index_agent_memory(
+                    "artifact",
+                    f"{session_id}:{clean_rel}",
+                    f"Sandbox artifact {entry['name']} ({clean_rel}) created by {tool}",
+                    session_id=session_id,
+                )
+        except Exception:
+            pass
         return entry
 
 

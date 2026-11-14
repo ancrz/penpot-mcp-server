@@ -62,3 +62,35 @@ async def test_agent_store_sqlite_isolation_and_seed(tmp_path: Path) -> None:
     assert await store.delete_chat_session("default") is False
     assert await store.delete_chat_session("s-sqlite-1") is True
     assert await store.get_chat_session("s-sqlite-1") is None
+
+
+@pytest.mark.asyncio
+async def test_agent_store_sqlite_vec_semantic_memory(tmp_path: Path) -> None:
+    db_file = tmp_path / "agent_vec.db"
+    store = AgentStateStore(backend="sqlite", db_url=f"sqlite:///{db_file}")
+    desc = store.describe()
+    assert desc["sqlite_vec"] is True
+
+    r1 = await store.index_agent_memory(
+        "chat_turn",
+        "s1:1",
+        "Login form dark theme with #6366f1 button and SSO email input",
+        session_id="s1",
+    )
+    r2 = await store.index_agent_memory(
+        "artifact",
+        "s1:outputs/logo_opt.svg",
+        "Optimized SVG brand logo exported from design_suite_sandbox",
+        session_id="s1",
+    )
+    assert r1["indexed"] is True and r1["vec0"] is True
+    assert r2["indexed"] is True and r2["vec0"] is True
+
+    hits = await store.search_agent_memory("dark login button #6366f1", limit=2)
+    assert len(hits) >= 1
+    assert hits[0]["engine"] == "sqlite-vec"
+    assert any(h["kind"] == "chat_turn" for h in hits)
+
+    art_hits = await store.search_agent_memory("SVG brand logo", kind="artifact", limit=2)
+    assert len(art_hits) == 1
+    assert art_hits[0]["ref_id"] == "s1:outputs/logo_opt.svg"

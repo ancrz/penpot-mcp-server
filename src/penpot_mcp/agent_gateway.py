@@ -2713,6 +2713,22 @@ class PenpotAgentGateway:
             if att_blocks
             else ""
         )
+        memory_section = ""
+        if agent_store.backend == "sqlite":
+            try:
+                hits = await agent_store.search_agent_memory(prompt, limit=3)
+            except Exception:
+                hits = []
+            if hits:
+                mem_lines = [
+                    f"- [{h.get('kind')}] ({h.get('ref_id')}): {str(h.get('summary') or '')[:220]}"
+                    for h in hits
+                ]
+                memory_section = (
+                    "\n\n=== SEMANTIC AGENT MEMORY (sqlite-vec) ===\n"
+                    + "\n".join(mem_lines)
+                    + "\n=========================================="
+                )
         delta_section = (
             "\n\n=== MANUAL / CANVAS CHANGES SINCE LAST TURN ===\n"
             f"revn {canvas_delta.get('previous_revn')} -> {canvas_delta.get('current_revn')}: "
@@ -2745,6 +2761,7 @@ class PenpotAgentGateway:
             "3. INSPECT BEFORE CRITIQUE (Industry Design2Code / ACI Protocol): Whenever the user asks to evaluate, audit, critique, review, or compare the canvas against code/specs, you MUST call `call_penpot_branch_tool` (e.g. `penpot_inspect` with `action='page_objects'` or `'shape_tree'`) BEFORE answering. Never critique from the top-K summary alone: inspect the full page tree to report duplicate/overlapping frames, orphan shapes outside frames, missing UI controls vs. the attached source, spacing/8px grid drift, and border/token mismatches.\n"
             "4. GROUNDED TOOL NAMES & CONCISENESS: Cite only declared tools (`call_penpot_branch_tool`, `run_penpot_batch`, `query_canvas_vision_pgvector`, `media_sandbox_ffmpeg`) and keep your final response concise in the user's language (Spanish or English)."
             f"{delta_section}"
+            f"{memory_section}"
             f"{attachments_section}"
             f"{addendum_block}"
         )
