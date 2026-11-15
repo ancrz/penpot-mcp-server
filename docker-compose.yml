@@ -1,0 +1,331 @@
+name: penpot
+
+# ============================================================
+# 🎨 Penpot Self-Hosted — Docker Compose (Hardened)
+# ============================================================
+# Source: https://github.com/penpot/penpot/blob/main/docker/images/docker-compose.yaml
+# Hardened by: ancruz (UID/GID fix, .env driven, documented)
+#
+# Usage:
+#   docker compose up -d
+#   docker compose logs -f
+#   docker compose down
+#
+# Access:
+#   Penpot UI:      http://localhost:${PENPOT_PORT:-9001}
+#   Mailcatcher:    http://localhost:1080  (dev SMTP viewer)
+# ============================================================
+
+networks:
+  penpot:
+
+volumes:
+  penpot_postgres_v15:
+  penpot_pg_backups:
+  penpot_assets:
+  penpot_sandbox_data:
+
+services:
+  # ── PostgreSQL + pgvector Auto-Migrator (Init-Container) ──
+  penpot-pg-migrator:
+    build:
+      context: .
+      dockerfile: Dockerfile.pg-migrator
+      args:
+        PG_OLD_IMAGE: "pgvector/pgvector:pg15"
+        PG_TARGET_IMAGE: "${POSTGRES_IMAGE:-pgvector/pgvector:pg17}"
+    container_name: penpot-pg-migrator
+    restart: "no"
+    volumes:
+      - penpot_postgres_v15:/var/lib/postgresql/data
+      - penpot_pg_backups:/backups
+    environment:
+      POSTGRES_TARGET_MAJOR: "${POSTGRES_TARGET_MAJOR:-17}"
+      POSTGRES_DB: ${PENPOT_DB_NAME:-penpot}
+      POSTGRES_USER: ${PENPOT_DB_USER:-penpot}
+      POSTGRES_PASSWORD: ${PENPOT_DB_PASS:-penpot}
+  # ── Frontend (Nginx + SPA) ──────────────────────────────
+  penpot-frontend:
+    image: "penpotapp/frontend:${PENPOT_VERSION:-latest}"
+    container_name: penpot-frontend
+    restart: unless-stopped
+    ports:
+      - "${PENPOT_PORT:-9001}:8080"
+    volumes:
+      - penpot_assets:/opt/data/assets
+    depends_on:
+      - penpot-backend
+      - penpot-exporter
+    networks:
+      - penpot
+    environment:
+      PENPOT_FLAGS: ${PENPOT_FLAGS}
+      PENPOT_HTTP_SERVER_MAX_BODY_SIZE: ${PENPOT_HTTP_SERVER_MAX_BODY_SIZE:-31457280}
+      PENPOT_HTTP_SERVER_MAX_MULTIPART_BODY_SIZE: ${PENPOT_HTTP_SERVER_MAX_MULTIPART_BODY_SIZE:-367001600}
+
+  # ── Backend (Clojure API) ───────────────────────────────
+  penpot-backend:
+    image: "penpotapp/backend:${PENPOT_VERSION:-latest}"
+    container_name: penpot-backend
+    restart: unless-stopped
+    # UID/GID fix: run as host user to avoid permission denied on volumes
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    volumes:
+      - penpot_assets:/opt/data/assets
+    depends_on:
+      penpot-postgres:
+        condition: service_healthy
+      penpot-valkey:
+        condition: service_healthy
+    networks:
+      - penpot
+    environment:
+      PENPOT_FLAGS: ${PENPOT_FLAGS}
+      PENPOT_PUBLIC_URI: ${PENPOT_PUBLIC_URI:-http://localhost:9001}
+      PENPOT_SECRET_KEY: ${PENPOT_SECRET_KEY}
+      PENPOT_HTTP_SERVER_MAX_BODY_SIZE: ${PENPOT_HTTP_SERVER_MAX_BODY_SIZE:-31457280}
+      PENPOT_HTTP_SERVER_MAX_MULTIPART_BODY_SIZE: ${PENPOT_HTTP_SERVER_MAX_MULTIPART_BODY_SIZE:-367001600}
+
+      # Database
+      PENPOT_DATABASE_URI: postgresql://penpot-postgres/${PENPOT_DB_NAME:-penpot}
+      PENPOT_DATABASE_USERNAME: ${PENPOT_DB_USER:-penpot}
+      PENPOT_DATABASE_PASSWORD: ${PENPOT_DB_PASS:-penpot}
+
+      # Cache/PubSub (Valkey = Redis-compatible)
+      PENPOT_REDIS_URI: redis://penpot-valkey/0
+
+      # Storage
+      PENPOT_OBJECTS_STORAGE_BACKEND: fs
+      PENPOT_OBJECTS_STORAGE_FS_DIRECTORY: /opt/data/assets
+
+      # Telemetry
+      PENPOT_TELEMETRY_ENABLED: ${PENPOT_TELEMETRY_ENABLED:-false}
+
+      # SMTP
+      PENPOT_SMTP_DEFAULT_FROM: ${PENPOT_SMTP_DEFAULT_FROM:-no-reply@penpot.local}
+      PENPOT_SMTP_DEFAULT_REPLY_TO: ${PENPOT_SMTP_DEFAULT_REPLY_TO:-no-reply@penpot.local}
+      PENPOT_SMTP_HOST: ${PENPOT_SMTP_HOST:-penpot-mailcatch}
+      PENPOT_SMTP_PORT: ${PENPOT_SMTP_PORT:-1025}
+      PENPOT_SMTP_USERNAME: ${PENPOT_SMTP_USERNAME:-}
+      PENPOT_SMTP_PASSWORD: ${PENPOT_SMTP_PASSWORD:-}
+      PENPOT_SMTP_TLS: ${PENPOT_SMTP_TLS:-false}
+      PENPOT_SMTP_SSL: ${PENPOT_SMTP_SSL:-false}
+
+  # ── Exporter (PDF/SVG/PNG) ──────────────────────────────
+  penpot-exporter:
+    image: "penpotapp/exporter:${PENPOT_VERSION:-latest}"
+    container_name: penpot-exporter
+    restart: unless-stopped
+    depends_on:
+      penpot-valkey:
+        condition: service_healthy
+    networks:
+      - penpot
+    environment:
+      PENPOT_SECRET_KEY: ${PENPOT_SECRET_KEY}
+      PENPOT_PUBLIC_URI: http://penpot-frontend:8080
+      PENPOT_REDIS_URI: redis://penpot-valkey/0
+
+  # ── PostgreSQL 17 + pgvector (Tuned) ────────────────────
+  penpot-postgres:
+    image: "${POSTGRES_IMAGE:-pgvector/pgvector:pg17}"
+    container_name: penpot-postgres
+    restart: unless-stopped
+    stop_signal: SIGINT
+    depends_on:
+      penpot-pg-migrator:
+        condition: service_completed_successfully
+    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PENPOT_DB_USER:-penpot}"]
+      interval: 2s
+      timeout: 10s
+      retries: 5
+      start_period: 2s
+    ports:
+      - "127.0.0.1:5433:5432"   # MCP access (localhost only)
+    volumes:
+      - penpot_postgres_v15:/var/lib/postgresql/data
+      - ./config/postgresql/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./scripts/init_pgvector_and_users.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    networks:
+      - penpot
+    environment:
+      POSTGRES_INITDB_ARGS: --data-checksums
+      POSTGRES_DB: ${PENPOT_DB_NAME:-penpot}
+      POSTGRES_USER: ${PENPOT_DB_USER:-penpot}
+      POSTGRES_PASSWORD: ${PENPOT_DB_PASS:-penpot}
+
+  # ── Valkey 8.1 (Tuned: Penpot DB 0 + MCP Cache DB 1) ────
+  penpot-valkey:
+    image: "${VALKEY_IMAGE:-valkey/valkey:8.1}"
+    container_name: penpot-valkey
+    restart: unless-stopped
+    command: ["valkey-server", "/usr/local/etc/valkey/valkey.conf"]
+    volumes:
+      - ./config/valkey/valkey.conf:/usr/local/etc/valkey/valkey.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli ping | grep PONG"]
+      interval: 1s
+      timeout: 3s
+      retries: 5
+      start_period: 3s
+    networks:
+      - penpot
+
+  # ── Go WebSocket Hub (Imperative Go concurrency) ────────
+  penpot-ws-go:
+    build:
+      context: ./ws-hub-go
+      dockerfile: Dockerfile
+    container_name: penpot-ws-go
+    restart: unless-stopped
+    ports:
+      - "4402:4402"
+    networks:
+      - penpot
+    environment:
+      WS_GO_ADDR: ":4402"
+      MCP_TELEMETRY_URL: "http://penpot-mcp:8787/plugin/telemetry"
+      WS_TOKEN: "${WS_TOKEN:-}"
+
+  # ── Nginx Unprivileged Gateway (React+Zod SPA + Proxy) ──
+  penpot-nginx:
+    build:
+      context: .
+      dockerfile: nginx/Dockerfile
+    container_name: penpot-nginx
+    restart: unless-stopped
+    ports:
+      - "8787:8080"
+    depends_on:
+      penpot-mcp:
+        condition: service_started
+      penpot-ws-go:
+        condition: service_started
+    networks:
+      - penpot
+
+  # ── MCP Server (Python 3.14 AI Agent Interface) ─────────
+  # Provides 14 domain branch tools + Code Mode + AI Gateway
+  penpot-mcp:
+    image: penpot-mcp:${PENPOT_MCP_VERSION:-0.7.0}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PENPOT_MCP_VERSION: "${PENPOT_MCP_VERSION:-0.7.0}"
+        PYTHON_IMAGE_TAG: "${PYTHON_IMAGE_TAG:-3.14-slim}"
+    container_name: penpot-mcp
+    restart: unless-stopped
+    depends_on:
+      penpot-postgres:
+        condition: service_healthy
+      penpot-valkey:
+        condition: service_healthy
+      penpot-backend:
+        condition: service_started
+    networks:
+      - penpot
+    environment:
+      PENPOT_MCP_VERSION: "${PENPOT_MCP_VERSION:-0.7.0}"
+      VALKEY_URL: "${VALKEY_URL:-redis://penpot-valkey:6379/1}"
+      VALKEY_CACHE_TTL: "${VALKEY_CACHE_TTL:-120}"
+      MCP_TOOL_MODE: "${MCP_TOOL_MODE:-compressed}"
+      PENPOT_BASE_URL: "http://penpot-frontend:8080"
+      PENPOT_PUBLIC_URL: ${PENPOT_PUBLIC_URI:-http://localhost:9001}
+      PENPOT_ACCESS_TOKEN: "${PENPOT_ACCESS_TOKEN:-}"
+      PENPOT_EMAIL: "${PENPOT_EMAIL:-}"
+      PENPOT_PASSWORD: "${PENPOT_PASSWORD:-}"
+      PENPOT_DB_HOST: "penpot-postgres"
+      PENPOT_DB_PORT: "5432"
+      PENPOT_DB_NAME: ${PENPOT_DB_NAME:-penpot}
+      PENPOT_DB_USER: ${PENPOT_DB_USER:-penpot}
+      PENPOT_DB_PASS: ${PENPOT_DB_PASS:-penpot}
+      MCP_HOST: "0.0.0.0"
+      MCP_PORT: "8787"
+      MCP_LOG_LEVEL: "info"
+      MCP_ALLOWED_HOSTS: '["127.0.0.1","localhost","penpot-mcp","host.docker.internal"]'
+      WS_ENABLED: "${WS_ENABLED:-true}"
+      WS_HOST: "0.0.0.0"
+      WS_PORT: "4402"
+      WS_TOKEN: "${WS_TOKEN:-}"
+      PLUGIN_WS_URL: "ws://localhost:4402"
+      PENPOT_AGENT_MODE: "${PENPOT_AGENT_MODE:-auto}"
+      PENPOT_AGENT_MODEL: "${PENPOT_AGENT_MODEL:-gemini-3.5-flash-lite}"
+      PENPOT_AGENT_FALLBACK_MODEL: "${PENPOT_AGENT_FALLBACK_MODEL:-gemini-2.5-flash}"
+      GOOGLE_API_KEY: "${GOOGLE_API_KEY:-}"
+      GOOGLE_API_KEY_BACKUP: "${GOOGLE_API_KEY_BACKUP:-}"
+      SANDBOX_ROOT: "/sandbox"
+      FFMPEG_MCP_URL: "http://penpot-ffmpeg-mcp:8890"
+      SUITE_MCP_URL: "http://penpot-suite-mcp:8891"
+    volumes:
+      - penpot_sandbox_data:/sandbox
+
+  # ── FFmpeg MCP Sandbox (Isolated Image & Media Manipulation) ─
+  penpot-ffmpeg-mcp:
+    image: penpot-ffmpeg-mcp:${PENPOT_MCP_VERSION:-0.7.0}
+    build:
+      context: .
+      dockerfile: Dockerfile.ffmpeg-mcp
+    container_name: penpot-ffmpeg-mcp
+    restart: unless-stopped
+    networks:
+      - penpot
+    volumes:
+      - penpot_sandbox_data:/sandbox
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: 512m
+    cpus: "0.5"
+    pids_limit: 64
+    environment:
+      SANDBOX_ROOT: "/sandbox"
+      FFMPEG_MCP_HOST: "0.0.0.0"
+      FFMPEG_MCP_PORT: "8890"
+
+  # ── Design & Document Suite MCP Sandbox (Vector/Palette/WCAG/Docs/Data) ─
+  penpot-suite-mcp:
+    image: penpot-suite-mcp:${PENPOT_MCP_VERSION:-0.7.0}
+    build:
+      context: .
+      dockerfile: Dockerfile.suite-mcp
+    container_name: penpot-suite-mcp
+    restart: unless-stopped
+    networks:
+      - penpot
+    volumes:
+      - penpot_sandbox_data:/sandbox
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: 512m
+    cpus: "0.5"
+    pids_limit: 64
+    environment:
+      SANDBOX_ROOT: "/sandbox"
+      SUITE_MCP_HOST: "0.0.0.0"
+      SUITE_MCP_PORT: "8891"
+
+  # ── Mailcatcher (Dev SMTP) ──────────────────────────────
+  # Web UI: http://localhost:1080
+  # Remove in production and configure real SMTP above
+  penpot-mailcatch:
+    image: sj26/mailcatcher:latest
+    container_name: penpot-mailcatch
+    restart: unless-stopped
+    expose:
+      - "1025"
+    ports:
+      - "1080:1080"
+    networks:
+      - penpot
