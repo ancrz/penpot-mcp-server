@@ -15,15 +15,17 @@ RUN pip install --no-cache-dir "mcp[cli]>=1.30.0,<2" "uvicorn>=0.54.0" "starlett
            /usr/local/lib/python*/site-packages/setuptools* \
            /usr/local/lib/python*/site-packages/wheel*
 
-COPY src/penpot_mcp/code_mode.py /app/code_mode.py
-COPY src/penpot_mcp/ffmpeg_mcp_server.py /app/ffmpeg_mcp_server.py
+COPY src/penpot_mcp/code_mode.py /app/penpot_mcp/code_mode.py
+COPY src/penpot_mcp/ffmpeg_mcp_server.py /app/penpot_mcp/ffmpeg_mcp_server.py
+RUN touch /app/penpot_mcp/__init__.py && chown -R appuser:appuser /app/penpot_mcp
 
 USER appuser
-ENV SANDBOX_ROOT=/sandbox \
+ENV PYTHONPATH=/app \
+    SANDBOX_ROOT=/sandbox \
     FFMPEG_MCP_HOST=0.0.0.0 \
     FFMPEG_MCP_PORT=8890
 
 EXPOSE 8890
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD ["python", "-c", "import os, socket; s = socket.create_connection(('127.0.0.1', int(os.environ.get('FFMPEG_MCP_PORT', '8890'))), timeout=3); s.close()"]
-CMD ["python", "/app/ffmpeg_mcp_server.py"]
+CMD ["python", "-m", "penpot_mcp.ffmpeg_mcp_server"]
